@@ -1,12 +1,12 @@
 # AI Personal Cookbook Builder
 
-A free Streamlit web app that uses AI to extract recipes from images and text, then generates beautiful PDF cookbooks.
+A free Streamlit web app that uses AI to extract recipes from images and text, then generates beautiful, mobile-friendly HTML cookbooks.
 
 ## Features
 
 - **📸 Image Processing**: Upload recipe photos or handwritten notes - AI extracts recipes automatically
 - **📝 Text Input**: Paste recipe text for instant processing
-- **📄 PDF Generation**: Download professional PDF cookbooks
+- **📱 HTML Generation**: Download beautiful, responsive cookbooks that work perfectly on mobile
 - **📊 Token Tracking**: Monitor API usage costs
 - **🔒 Privacy**: All processing happens client-side, recipes stay private
 
@@ -14,7 +14,7 @@ A free Streamlit web app that uses AI to extract recipes from images and text, t
 
 - **Frontend**: Streamlit
 - **AI**: Groq API (LLaVA for vision, Llama for text)
-- **PDF**: FPDF
+- **HTML Generation**: Pure HTML with responsive CSS
 - **Image Processing**: PIL/Pillow
 
 ## Quick Start
@@ -64,7 +64,7 @@ A free Streamlit web app that uses AI to extract recipes from images and text, t
 
 1. **Upload recipe photos** or **paste recipe text**
 2. **AI extracts** title, ingredients, and steps automatically
-3. **Generate & download** your PDF cookbook
+3. **Generate & download** your HTML cookbook (works great on mobile!)
 4. **Share** the recipes with family and friends!
 
 ## Privacy
