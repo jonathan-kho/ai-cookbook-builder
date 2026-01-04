@@ -114,9 +114,9 @@ except Exception as e:
 
 st.title("Free AI Personal Cookbook Builder v0.1")
 
-if "recipes" not in st.session_state:
+if "recipes" not in st.session_state or not isinstance(st.session_state.recipes, list):
     st.session_state.recipes = []
-if "token_usage" not in st.session_state:
+if "token_usage" not in st.session_state or not isinstance(st.session_state.token_usage, (int, float)):
     st.session_state.token_usage = 0
 
 uploaded_files = st.file_uploader("Upload recipe images/photos/handwritten notes (multiple OK)", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
@@ -129,46 +129,76 @@ if st.button("Extract Recipe(s)"):
 
         # Vision for images
         for file in uploaded_files:
-            img = Image.open(file)
-            buffered = io.BytesIO()
-            img.save(buffered, format="JPEG")
-            base64_img = base64.b64encode(buffered.getvalue()).decode()
+            try:
+                # Validate and process image
+                img = Image.open(file)
+                # Convert to RGB if necessary (handles PNG with transparency)
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+                # Resize large images to prevent API limits (max ~4MB base64)
+                max_size = (1024, 1024)
+                if img.size[0] > max_size[0] or img.size[1] > max_size[1]:
+                    img.thumbnail(max_size, Image.Resampling.LANCZOS)
+                buffered = io.BytesIO()
+                img.save(buffered, format="JPEG", quality=85)
+                base64_img = base64.b64encode(buffered.getvalue()).decode()
+            except Exception as img_error:
+                st.error(f"Failed to process image {file.name}: {str(img_error)[:50]}")
+                continue
 
-            response = client.chat.completions.create(
-                model="llava-v1.5-7b-4096-preview",  # Groq vision model
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "Extract the recipe from this image and output ONLY valid JSON with no extra text or explanation. Format: {\"title\": \"Recipe Title\", \"ingredients\": [\"ingredient 1\", \"ingredient 2\"], \"steps\": [\"1. First step\", \"2. Second step\"]}. Read all text carefully."},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}}
-                    ]
-                }],
-                max_tokens=500
-            )
+            try:
+                response = client.chat.completions.create(
+                    model="llava-v1.5-7b-4096-preview",  # Groq vision model
+                    messages=[{
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "Extract the recipe from this image and output ONLY valid JSON with no extra text or explanation. Format: {\"title\": \"Recipe Title\", \"ingredients\": [\"ingredient 1\", \"ingredient 2\"], \"steps\": [\"1. First step\", \"2. Second step\"]}. Read all text carefully."},
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}}
+                        ]
+                    }],
+                    max_tokens=500
+                )
+            except Exception as api_error:
+                st.error(f"API error processing image {file.name}: {str(api_error)[:100]}")
+                continue
             try:
                 recipe = parse_recipe_json(response.choices[0].message.content)
-                new_recipes.append(recipe)
-                total_tokens += response.usage.total_tokens
+                # Validate recipe structure
+                if isinstance(recipe, dict) and 'title' in recipe:
+                    new_recipes.append(recipe)
+                    total_tokens += response.usage.total_tokens
+                else:
+                    st.error(f"Invalid recipe format from image {file.name}")
             except Exception as e:
                 st.error(f"Failed to extract recipe from image: {str(e)[:100]}")
 
         # Text-only model for pasted text
         if text_input:
-            response = client.chat.completions.create(
-                model="llama-3.1-8b-instant",  # Fast text model
-                messages=[{"role": "user", "content": f"Extract the recipe from this text and output ONLY a JSON object with this exact format, no extra text, no markdown:\n\n{{\"title\": \"Recipe Title Here\", \"ingredients\": [\"ingredient 1\", \"ingredient 2\", \"etc\"], \"steps\": [\"1. First step\", \"2. Second step\", \"etc\"]}}\n\nRecipe text to extract from:\n{text_input}"}],
-                max_tokens=800  # Increased for complex recipes
-            )
+            try:
+                response = client.chat.completions.create(
+                    model="llama-3.1-8b-instant",  # Fast text model
+                    messages=[{"role": "user", "content": f"Extract the recipe from this text and output ONLY a JSON object with this exact format, no extra text, no markdown:\n\n{{\"title\": \"Recipe Title Here\", \"ingredients\": [\"ingredient 1\", \"ingredient 2\", \"etc\"], \"steps\": [\"1. First step\", \"2. Second step\", \"etc\"]}}\n\nRecipe text to extract from:\n{text_input}"}],
+                    max_tokens=800  # Increased for complex recipes
+                )
+            except Exception as api_error:
+                st.error(f"API error processing text: {str(api_error)[:100]}")
+                text_input = None  # Skip text processing
             try:
                 recipe = parse_recipe_json(response.choices[0].message.content)
-                new_recipes.append(recipe)
-                total_tokens += response.usage.total_tokens
+                # Validate recipe structure
+                if isinstance(recipe, dict) and 'title' in recipe:
+                    new_recipes.append(recipe)
+                    total_tokens += response.usage.total_tokens
+                else:
+                    st.error("Invalid recipe format from text")
             except Exception as e:
                 st.error(f"Failed to extract recipe from text: {str(e)[:100]}")
 
-        st.session_state.recipes.extend(new_recipes)
+        # Only add valid recipes
+        valid_recipes = [r for r in new_recipes if isinstance(r, dict) and 'title' in r]
+        st.session_state.recipes.extend(valid_recipes)
         st.session_state.token_usage += total_tokens
-        st.success(f"Added {len(new_recipes)} recipe(s)! Total recipes: {len(st.session_state.recipes)}")
+        st.success(f"Added {len(valid_recipes)} recipe(s)! Total recipes: {len(st.session_state.recipes)}")
         st.info(f"Tokens used this extraction: {total_tokens} | Cumulative: {st.session_state.token_usage}")
 
 if st.session_state.recipes:
@@ -185,26 +215,21 @@ if st.session_state.recipes:
             st.write(f"Found {len(st.session_state.recipes)} recipes to process")
 
             def clean_text(text):
-                """Clean text for PDF - handle Unicode safely."""
+                """Clean text for PDF - remove all non-ASCII characters for maximum compatibility."""
                 if not text:
                     return ""
-                # Replace problematic Unicode chars with safe alternatives
-                replacements = {
-                    '°': ' degrees', '½': '1/2', '¼': '1/4', '¾': '3/4',
-                    '–': '-', '—': '-', '…': '...',
-                    '"': '"', '"': '"', ''': "'", ''': "'",
-                    '•': '-',  # Replace bullet points with dashes
-                    '\t': ' ', '\n': ' ', '\r': ' '  # Replace tabs/newlines with spaces
-                }
-                for old, new in replacements.items():
-                    text = text.replace(old, new)
-                # Remove only null bytes and other truly problematic chars
-                text = text.replace('\x00', '')  # Remove null bytes
-                return text.strip()
+                # Keep only ASCII characters (0-127) for guaranteed PDF compatibility
+                return ''.join(c for c in text if ord(c) < 128).strip()
 
             def wrap_text_for_pdf(text, max_line_length=60):
                 """Wrap text into lines short enough for PDF rendering."""
-                if not text or len(text) <= max_line_length:
+                if not text:
+                    return ""
+
+                # First clean the text
+                text = clean_text(text)
+
+                if len(text) <= max_line_length:
                     return text
 
                 words = text.split()
@@ -232,52 +257,60 @@ if st.session_state.recipes:
 
                 return "\n".join(lines)
 
+            # Ensure ALL recipe data is ASCII-only before PDF generation
+            for recipe in st.session_state.recipes[:]:  # Work on a copy
+                recipe['title'] = clean_text(recipe.get('title', ''))
+                recipe['ingredients'] = [clean_text(ing) for ing in recipe.get('ingredients', [])]
+                recipe['steps'] = [clean_text(step) for step in recipe.get('steps', [])]
+
             # Create PDF with standard fonts
             pdf = FPDF()
             pdf.add_page()
             pdf.set_font("Helvetica", 'B', 16)  # Use standard PDF font
 
-            # Title
-            pdf.cell(0, 10, "My Personal Cookbook", ln=1, align='C')
+            # Title (ensure ASCII)
+            title_text = clean_text("My Personal Cookbook")
+            pdf.cell(0, 10, title_text, ln=1, align='C')
             pdf.ln(10)
 
-            st.write("Generating PDF content...")
             for i, recipe in enumerate(st.session_state.recipes, 1):
-                st.write(f"Processing recipe {i}: {recipe.get('title', 'Untitled')}")
-                # Recipe Title
+                # Recipe Title (already cleaned above)
                 pdf.set_font("Helvetica", 'B', 14)
-                title = clean_text(recipe.get('title', 'Untitled'))
+                title = recipe.get('title', clean_text('Untitled'))
                 pdf.cell(0, 10, title, ln=1)
                 pdf.ln(5)
 
-                # Ingredients
+                # Ingredients header
                 pdf.set_font("Helvetica", 'B', 12)
-                pdf.cell(0, 10, "Ingredients:", ln=1)
+                pdf.cell(0, 10, clean_text("Ingredients:"), ln=1)
                 pdf.set_font("Helvetica", '', 11)
 
                 ingredients = recipe.get('ingredients', [])
                 if ingredients:
-                for ing in ingredients:
-                    ing = clean_text(ing)
-                    pdf.cell(0, 8, f"- {ing}", ln=1)
+                    for ing in ingredients:
+                        # Double-check cleaning
+                        ing = clean_text(ing)
+                        pdf.cell(0, 8, f"- {ing}", ln=1)
                 else:
-                    pdf.cell(0, 8, "No ingredients listed", ln=1)
+                    pdf.cell(0, 8, clean_text("No ingredients listed"), ln=1)
                 pdf.ln(5)
 
-                # Steps
+                # Steps header
                 pdf.set_font("Helvetica", 'B', 12)
-                pdf.cell(0, 10, "Steps:", ln=1)
+                pdf.cell(0, 10, clean_text("Steps:"), ln=1)
                 pdf.set_font("Helvetica", '', 11)
 
                 steps = recipe.get('steps', [])
                 if steps:
-                    for i, step in enumerate(steps, 1):
+                    for j, step in enumerate(steps, 1):
+                        # Triple-check cleaning
                         step = clean_text(step)
                         wrapped_step = wrap_text_for_pdf(step, max_line_length=70)
-                        pdf.multi_cell(0, 8, f"{i}. {wrapped_step}")
+                        wrapped_step = clean_text(wrapped_step)  # Final cleaning
+                        pdf.multi_cell(0, 8, f"{j}. {wrapped_step}")
                         pdf.ln(2)
                 else:
-                    pdf.cell(0, 8, "No steps listed", ln=1)
+                    pdf.cell(0, 8, clean_text("No steps listed"), ln=1)
                 pdf.ln(10)
 
             # Generate PDF
