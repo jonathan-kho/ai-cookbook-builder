@@ -265,7 +265,7 @@ if st.session_state.recipes:
             pdf.ln(10)
 
         # Generate PDF
-        pdf_bytes = bytes(pdf.output(dest='S'))  # Convert bytearray to bytes
+        pdf_bytes = pdf.output(dest='S')
         st.download_button("Download Cookbook PDF", pdf_bytes, "my_cookbook.pdf", "application/pdf")
         st.success("PDF ready!")
 
