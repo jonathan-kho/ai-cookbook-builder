@@ -193,6 +193,7 @@ if st.session_state.recipes:
                     '°': ' degrees', '½': '1/2', '¼': '1/4', '¾': '3/4',
                     '–': '-', '—': '-', '…': '...',
                     '"': '"', '"': '"', ''': "'", ''': "'",
+                    '•': '-',  # Replace bullet points with dashes
                     '\t': ' ', '\n': ' ', '\r': ' '  # Replace tabs/newlines with spaces
                 }
                 for old, new in replacements.items():
@@ -256,9 +257,9 @@ if st.session_state.recipes:
 
                 ingredients = recipe.get('ingredients', [])
                 if ingredients:
-                    for ing in ingredients:
-                        ing = clean_text(ing)
-                        pdf.cell(0, 8, f"• {ing}", ln=1)
+                for ing in ingredients:
+                    ing = clean_text(ing)
+                    pdf.cell(0, 8, f"- {ing}", ln=1)
                 else:
                     pdf.cell(0, 8, "No ingredients listed", ln=1)
                 pdf.ln(5)
