@@ -177,112 +177,112 @@ if st.session_state.recipes:
         st.write(f"**{r.get('title', 'Untitled')}** - {len(r.get('ingredients', []))} ingredients")
 
     if st.button("Generate & Download PDF Cookbook"):
-        # Debug: show what we have
-        st.write(f"Found {len(st.session_state.recipes)} recipes to process")
-
+        # Check if we have recipes
         if not st.session_state.recipes:
             st.error("No recipes to generate PDF from. Please extract some recipes first.")
-            return
+        else:
+            # Debug: show what we have
+            st.write(f"Found {len(st.session_state.recipes)} recipes to process")
 
-        def clean_text(text):
-            """Clean text for PDF - handle Unicode safely."""
-            if not text:
-                return ""
-            # Replace problematic Unicode chars with safe alternatives
-            replacements = {
-                '°': ' degrees', '½': '1/2', '¼': '1/4', '¾': '3/4',
-                '–': '-', '—': '-', '…': '...',
-                '"': '"', '"': '"', ''': "'", ''': "'",
-                '\t': ' ', '\n': ' ', '\r': ' '  # Replace tabs/newlines with spaces
-            }
-            for old, new in replacements.items():
-                text = text.replace(old, new)
-            # Remove only null bytes and other truly problematic chars
-            text = text.replace('\x00', '')  # Remove null bytes
-            return text.strip()
+            def clean_text(text):
+                """Clean text for PDF - handle Unicode safely."""
+                if not text:
+                    return ""
+                # Replace problematic Unicode chars with safe alternatives
+                replacements = {
+                    '°': ' degrees', '½': '1/2', '¼': '1/4', '¾': '3/4',
+                    '–': '-', '—': '-', '…': '...',
+                    '"': '"', '"': '"', ''': "'", ''': "'",
+                    '\t': ' ', '\n': ' ', '\r': ' '  # Replace tabs/newlines with spaces
+                }
+                for old, new in replacements.items():
+                    text = text.replace(old, new)
+                # Remove only null bytes and other truly problematic chars
+                text = text.replace('\x00', '')  # Remove null bytes
+                return text.strip()
 
-        def wrap_text_for_pdf(text, max_line_length=60):
-            """Wrap text into lines short enough for PDF rendering."""
-            if not text or len(text) <= max_line_length:
-                return text
+            def wrap_text_for_pdf(text, max_line_length=60):
+                """Wrap text into lines short enough for PDF rendering."""
+                if not text or len(text) <= max_line_length:
+                    return text
 
-            words = text.split()
-            lines = []
-            current_line = ""
+                words = text.split()
+                lines = []
+                current_line = ""
 
-            for word in words:
-                # If word itself is too long, break it
-                if len(word) > max_line_length:
-                    if current_line:
-                        lines.append(current_line)
-                        current_line = ""
-                    # Break long word into chunks
-                    for i in range(0, len(word), max_line_length):
-                        lines.append(word[i:i+max_line_length])
-                elif len(current_line + " " + word) <= max_line_length:
-                    current_line += (" " + word) if current_line else word
-                else:
-                    if current_line:
-                        lines.append(current_line)
-                    current_line = word
+                for word in words:
+                    # If word itself is too long, break it
+                    if len(word) > max_line_length:
+                        if current_line:
+                            lines.append(current_line)
+                            current_line = ""
+                        # Break long word into chunks
+                        for i in range(0, len(word), max_line_length):
+                            lines.append(word[i:i+max_line_length])
+                    elif len(current_line + " " + word) <= max_line_length:
+                        current_line += (" " + word) if current_line else word
+                    else:
+                        if current_line:
+                            lines.append(current_line)
+                        current_line = word
 
-            if current_line:
-                lines.append(current_line)
+                if current_line:
+                    lines.append(current_line)
 
-            return "\n".join(lines)
+                return "\n".join(lines)
 
-        # Create PDF with standard fonts
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("Helvetica", 'B', 16)  # Use standard PDF font
+            # Create PDF with standard fonts
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_font("Helvetica", 'B', 16)  # Use standard PDF font
 
-        # Title
-        pdf.cell(0, 10, "My Personal Cookbook", ln=1, align='C')
-        pdf.ln(10)
-
-        st.write("Generating PDF content...")
-        for i, recipe in enumerate(st.session_state.recipes, 1):
-            st.write(f"Processing recipe {i}: {recipe.get('title', 'Untitled')}")
-            # Recipe Title
-            pdf.set_font("Helvetica", 'B', 14)
-            title = clean_text(recipe.get('title', 'Untitled'))
-            pdf.cell(0, 10, title, ln=1)
-            pdf.ln(5)
-
-            # Ingredients
-            pdf.set_font("Helvetica", 'B', 12)
-            pdf.cell(0, 10, "Ingredients:", ln=1)
-            pdf.set_font("Helvetica", '', 11)
-
-            ingredients = recipe.get('ingredients', [])
-            if ingredients:
-                for ing in ingredients:
-                    ing = clean_text(ing)
-                    pdf.cell(0, 8, f"• {ing}", ln=1)
-            else:
-                pdf.cell(0, 8, "No ingredients listed", ln=1)
-            pdf.ln(5)
-
-            # Steps
-            pdf.set_font("Helvetica", 'B', 12)
-            pdf.cell(0, 10, "Steps:", ln=1)
-            pdf.set_font("Helvetica", '', 11)
-
-            steps = recipe.get('steps', [])
-            if steps:
-                for i, step in enumerate(steps, 1):
-                    step = clean_text(step)
-                    wrapped_step = wrap_text_for_pdf(step, max_line_length=70)
-                    pdf.multi_cell(0, 8, f"{i}. {wrapped_step}")
-                    pdf.ln(2)
-            else:
-                pdf.cell(0, 8, "No steps listed", ln=1)
+            # Title
+            pdf.cell(0, 10, "My Personal Cookbook", ln=1, align='C')
             pdf.ln(10)
 
-        # Generate PDF
-        pdf_bytes = pdf.output(dest='S')
-        st.download_button("Download Cookbook PDF", pdf_bytes, "my_cookbook.pdf", "application/pdf")
-        st.success("PDF ready!")
+            st.write("Generating PDF content...")
+            for i, recipe in enumerate(st.session_state.recipes, 1):
+                st.write(f"Processing recipe {i}: {recipe.get('title', 'Untitled')}")
+                # Recipe Title
+                pdf.set_font("Helvetica", 'B', 14)
+                title = clean_text(recipe.get('title', 'Untitled'))
+                pdf.cell(0, 10, title, ln=1)
+                pdf.ln(5)
+
+                # Ingredients
+                pdf.set_font("Helvetica", 'B', 12)
+                pdf.cell(0, 10, "Ingredients:", ln=1)
+                pdf.set_font("Helvetica", '', 11)
+
+                ingredients = recipe.get('ingredients', [])
+                if ingredients:
+                    for ing in ingredients:
+                        ing = clean_text(ing)
+                        pdf.cell(0, 8, f"• {ing}", ln=1)
+                else:
+                    pdf.cell(0, 8, "No ingredients listed", ln=1)
+                pdf.ln(5)
+
+                # Steps
+                pdf.set_font("Helvetica", 'B', 12)
+                pdf.cell(0, 10, "Steps:", ln=1)
+                pdf.set_font("Helvetica", '', 11)
+
+                steps = recipe.get('steps', [])
+                if steps:
+                    for i, step in enumerate(steps, 1):
+                        step = clean_text(step)
+                        wrapped_step = wrap_text_for_pdf(step, max_line_length=70)
+                        pdf.multi_cell(0, 8, f"{i}. {wrapped_step}")
+                        pdf.ln(2)
+                else:
+                    pdf.cell(0, 8, "No steps listed", ln=1)
+                pdf.ln(10)
+
+            # Generate PDF
+            pdf_bytes = pdf.output(dest='S')
+            st.download_button("Download Cookbook PDF", pdf_bytes, "my_cookbook.pdf", "application/pdf")
+            st.success("PDF ready!")
 
 st.caption("v0.1 - Free via Groq API (rate limits apply). For testing only.")
 st.info(f"Total tokens used in session: {st.session_state.token_usage}")
