@@ -5,7 +5,6 @@ import io
 import base64
 import json
 import re
-from fpdf import FPDF
 import os
 
 def parse_recipe_json(response_text):
@@ -112,6 +111,149 @@ except Exception as e:
     st.error(f"Failed to initialize Groq client: {e}")
     st.stop()
 
+def generate_html_cookbook(recipes):
+    """Generate beautiful HTML cookbook from recipes."""
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Personal Cookbook</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+            color: #333;
+        }
+        .header {
+            text-align: center;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .recipe {
+            background: white;
+            margin: 20px 0;
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            break-inside: avoid;
+        }
+        .recipe-title {
+            font-size: 28px;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 20px;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+        }
+        .section-title {
+            font-size: 20px;
+            font-weight: bold;
+            color: #34495e;
+            margin: 20px 0 10px 0;
+        }
+        .ingredients {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+        .ingredient {
+            margin: 5px 0;
+            padding-left: 20px;
+            position: relative;
+        }
+        .ingredient:before {
+            content: "•";
+            color: #3498db;
+            font-weight: bold;
+            position: absolute;
+            left: 0;
+        }
+        .steps {
+            counter-reset: step-counter;
+        }
+        .step {
+            margin: 10px 0;
+            padding-left: 30px;
+            position: relative;
+            line-height: 1.6;
+        }
+        .step:before {
+            counter-increment: step-counter;
+            content: counter(step-counter) ".";
+            color: #e74c3c;
+            font-weight: bold;
+            position: absolute;
+            left: 0;
+            width: 25px;
+            text-align: center;
+        }
+        @media print {
+            body { background: white; }
+            .recipe { break-inside: avoid; }
+        }
+        @media (max-width: 600px) {
+            body { padding: 10px; }
+            .recipe { padding: 15px; }
+            .recipe-title { font-size: 24px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>My Personal Cookbook</h1>
+        <p>Created with AI - Perfect for mobile and printing</p>
+    </div>
+"""
+
+    for recipe in recipes:
+        title = recipe.get('title', 'Untitled Recipe')
+        ingredients = recipe.get('ingredients', [])
+        steps = recipe.get('steps', [])
+
+        html += f"""
+    <div class="recipe">
+        <div class="recipe-title">{title}</div>
+
+        <div class="section-title">Ingredients</div>
+        <div class="ingredients">"""
+
+        if ingredients:
+            for ing in ingredients:
+                html += f'<div class="ingredient">{ing}</div>'
+        else:
+            html += '<div class="ingredient">No ingredients listed</div>'
+
+        html += """
+        </div>
+
+        <div class="section-title">Instructions</div>
+        <div class="steps">"""
+
+        if steps:
+            for step in steps:
+                html += f'<div class="step">{step}</div>'
+        else:
+            html += '<div class="step">No steps listed</div>'
+
+        html += """
+        </div>
+    </div>"""
+
+    html += """
+</body>
+</html>"""
+
+    return html
+
 st.title("Free AI Personal Cookbook Builder v0.1")
 
 if "recipes" not in st.session_state or not isinstance(st.session_state.recipes, list):
@@ -206,117 +348,30 @@ if st.session_state.recipes:
     for i, r in enumerate(st.session_state.recipes):
         st.write(f"**{r.get('title', 'Untitled')}** - {len(r.get('ingredients', []))} ingredients")
 
-    if st.button("Generate & Download PDF Cookbook"):
+    if st.button("Generate & Download Cookbook"):
         # Check if we have recipes
         if not st.session_state.recipes:
-            st.error("No recipes to generate PDF from. Please extract some recipes first.")
+            st.error("No recipes to generate cookbook from. Please extract some recipes first.")
         else:
-            # Debug: show what we have
             st.write(f"Found {len(st.session_state.recipes)} recipes to process")
 
-            def clean_text(text):
-                """Clean text for PDF - remove all non-ASCII characters for maximum compatibility."""
-                if not text:
-                    return ""
-                # Keep only ASCII characters (0-127) for guaranteed PDF compatibility
-                return ''.join(c for c in text if ord(c) < 128).strip()
+            # Generate beautiful HTML cookbook
+            html_content = generate_html_cookbook(st.session_state.recipes)
 
-            def wrap_text_for_pdf(text, max_line_length=60):
-                """Wrap text into lines short enough for PDF rendering."""
-                if not text:
-                    return ""
+            # Convert to bytes for download
+            html_bytes = html_content.encode('utf-8')
 
-                # First clean the text
-                text = clean_text(text)
+            st.download_button(
+                "Download Cookbook (HTML)",
+                html_bytes,
+                "my_cookbook.html",
+                "text/html"
+            )
+            st.success("Cookbook ready! Download as HTML for perfect mobile viewing.")
 
-                if len(text) <= max_line_length:
-                    return text
-
-                words = text.split()
-                lines = []
-                current_line = ""
-
-                for word in words:
-                    # If word itself is too long, break it
-                    if len(word) > max_line_length:
-                        if current_line:
-                            lines.append(current_line)
-                            current_line = ""
-                        # Break long word into chunks
-                        for i in range(0, len(word), max_line_length):
-                            lines.append(word[i:i+max_line_length])
-                    elif len(current_line + " " + word) <= max_line_length:
-                        current_line += (" " + word) if current_line else word
-                    else:
-                        if current_line:
-                            lines.append(current_line)
-                        current_line = word
-
-                if current_line:
-                    lines.append(current_line)
-
-                return "\n".join(lines)
-
-            # Ensure ALL recipe data is ASCII-only before PDF generation
-            for recipe in st.session_state.recipes[:]:  # Work on a copy
-                recipe['title'] = clean_text(recipe.get('title', ''))
-                recipe['ingredients'] = [clean_text(ing) for ing in recipe.get('ingredients', [])]
-                recipe['steps'] = [clean_text(step) for step in recipe.get('steps', [])]
-
-            # Create PDF with standard fonts
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.set_font("Helvetica", 'B', 16)  # Use standard PDF font
-
-            # Title (ensure ASCII)
-            title_text = clean_text("My Personal Cookbook")
-            pdf.cell(0, 10, title_text, ln=1, align='C')
-            pdf.ln(10)
-
-            for i, recipe in enumerate(st.session_state.recipes, 1):
-                # Recipe Title (already cleaned above)
-                pdf.set_font("Helvetica", 'B', 14)
-                title = recipe.get('title', clean_text('Untitled'))
-                pdf.cell(0, 10, title, ln=1)
-                pdf.ln(5)
-
-                # Ingredients header
-                pdf.set_font("Helvetica", 'B', 12)
-                pdf.cell(0, 10, clean_text("Ingredients:"), ln=1)
-                pdf.set_font("Helvetica", '', 11)
-
-                ingredients = recipe.get('ingredients', [])
-                if ingredients:
-                    for ing in ingredients:
-                        # Double-check cleaning
-                        ing = clean_text(ing)
-                        pdf.cell(0, 8, f"- {ing}", ln=1)
-                else:
-                    pdf.cell(0, 8, clean_text("No ingredients listed"), ln=1)
-                pdf.ln(5)
-
-                # Steps header
-                pdf.set_font("Helvetica", 'B', 12)
-                pdf.cell(0, 10, clean_text("Steps:"), ln=1)
-                pdf.set_font("Helvetica", '', 11)
-
-                steps = recipe.get('steps', [])
-                if steps:
-                    for j, step in enumerate(steps, 1):
-                        # Triple-check cleaning
-                        step = clean_text(step)
-                        wrapped_step = wrap_text_for_pdf(step, max_line_length=70)
-                        wrapped_step = clean_text(wrapped_step)  # Final cleaning
-                        pdf.multi_cell(0, 8, f"{j}. {wrapped_step}")
-                        pdf.ln(2)
-                else:
-                    pdf.cell(0, 8, clean_text("No steps listed"), ln=1)
-                pdf.ln(10)
-
-            # Generate PDF
-            pdf_bytes = pdf.output(dest='S')
-            st.download_button("Download Cookbook PDF", pdf_bytes, "my_cookbook.pdf", "application/pdf")
-            st.success("PDF ready!")
+            # Also show preview
+            st.markdown("### Preview:")
+            st.html(html_content)
 
 st.caption("v0.1 - Free via Groq API (rate limits apply). For testing only.")
 st.info(f"Total tokens used in session: {st.session_state.token_usage}")
