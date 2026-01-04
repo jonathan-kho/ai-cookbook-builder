@@ -177,21 +177,28 @@ if st.session_state.recipes:
         st.write(f"**{r.get('title', 'Untitled')}** - {len(r.get('ingredients', []))} ingredients")
 
     if st.button("Generate & Download PDF Cookbook"):
+        # Debug: show what we have
+        st.write(f"Found {len(st.session_state.recipes)} recipes to process")
+
+        if not st.session_state.recipes:
+            st.error("No recipes to generate PDF from. Please extract some recipes first.")
+            return
+
         def clean_text(text):
-            """Clean text for PDF - remove all non-ASCII and control chars."""
+            """Clean text for PDF - handle Unicode safely."""
             if not text:
                 return ""
-            # Replace common Unicode chars
+            # Replace problematic Unicode chars with safe alternatives
             replacements = {
-                '°': '°', '½': '1/2', '¼': '1/4', '¾': '3/4',
-                '–': '-', '—': '-', '"': '"', '"': '"',
-                ''': "'", ''': "'", '…': '...',
+                '°': ' degrees', '½': '1/2', '¼': '1/4', '¾': '3/4',
+                '–': '-', '—': '-', '…': '...',
+                '"': '"', '"': '"', ''': "'", ''': "'",
                 '\t': ' ', '\n': ' ', '\r': ' '  # Replace tabs/newlines with spaces
             }
             for old, new in replacements.items():
                 text = text.replace(old, new)
-            # Keep only printable ASCII, no control characters
-            text = ''.join(c for c in text if ord(c) >= 32 and ord(c) < 127)
+            # Remove only null bytes and other truly problematic chars
+            text = text.replace('\x00', '')  # Remove null bytes
             return text.strip()
 
         def wrap_text_for_pdf(text, max_line_length=60):
@@ -224,44 +231,52 @@ if st.session_state.recipes:
 
             return "\n".join(lines)
 
-        pdf = FPDF(orientation='P', unit='mm', format='A4')
-        pdf.set_margins(20, 20, 20)  # Wider margins
+        # Create PDF with standard fonts
+        pdf = FPDF()
         pdf.add_page()
-        pdf.set_font("Arial", 'B', 16)
-        # Use explicit page width minus margins for safe rendering
-        page_width = 210 - 40  # A4 width minus margins in mm
+        pdf.set_font("Helvetica", 'B', 16)  # Use standard PDF font
 
-        pdf.cell(page_width, 10, "My Personal Cookbook", ln=1, align='C')
+        # Title
+        pdf.cell(0, 10, "My Personal Cookbook", ln=1, align='C')
         pdf.ln(10)
 
-        for recipe in st.session_state.recipes:
-            # Title
-            pdf.set_font("Arial", 'B', 14)
+        st.write("Generating PDF content...")
+        for i, recipe in enumerate(st.session_state.recipes, 1):
+            st.write(f"Processing recipe {i}: {recipe.get('title', 'Untitled')}")
+            # Recipe Title
+            pdf.set_font("Helvetica", 'B', 14)
             title = clean_text(recipe.get('title', 'Untitled'))
-            pdf.cell(page_width, 10, title, ln=1)
+            pdf.cell(0, 10, title, ln=1)
+            pdf.ln(5)
 
             # Ingredients
-            pdf.set_font("Arial", '', 12)
-            pdf.cell(page_width, 10, "Ingredients:", ln=1)
-            for ing in recipe.get('ingredients', []):
-                ing = clean_text(ing)
-                # Use explicit width for safety
-                pdf.cell(page_width, 8, f"- {ing}", ln=1)
+            pdf.set_font("Helvetica", 'B', 12)
+            pdf.cell(0, 10, "Ingredients:", ln=1)
+            pdf.set_font("Helvetica", '', 11)
+
+            ingredients = recipe.get('ingredients', [])
+            if ingredients:
+                for ing in ingredients:
+                    ing = clean_text(ing)
+                    pdf.cell(0, 8, f"• {ing}", ln=1)
+            else:
+                pdf.cell(0, 8, "No ingredients listed", ln=1)
+            pdf.ln(5)
 
             # Steps
-            pdf.cell(page_width, 10, "Steps:", ln=1)
-            for i, step in enumerate(recipe.get('steps', []), 1):
-                step = clean_text(step)
-                wrapped_step = wrap_text_for_pdf(step, max_line_length=50)  # Even shorter
+            pdf.set_font("Helvetica", 'B', 12)
+            pdf.cell(0, 10, "Steps:", ln=1)
+            pdf.set_font("Helvetica", '', 11)
 
-                # Split into smaller chunks and render each with explicit width
-                step_lines = wrapped_step.split('\n')
-                for j, line in enumerate(step_lines):
-                    if line.strip():
-                        prefix = f"{i}. " if j == 0 else "    "
-                        safe_line = f"{prefix}{line}"
-                        # Use cell instead of multi_cell for guaranteed safety
-                        pdf.cell(page_width, 8, safe_line, ln=1)
+            steps = recipe.get('steps', [])
+            if steps:
+                for i, step in enumerate(steps, 1):
+                    step = clean_text(step)
+                    wrapped_step = wrap_text_for_pdf(step, max_line_length=70)
+                    pdf.multi_cell(0, 8, f"{i}. {wrapped_step}")
+                    pdf.ln(2)
+            else:
+                pdf.cell(0, 8, "No steps listed", ln=1)
             pdf.ln(10)
 
         # Generate PDF
