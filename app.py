@@ -131,105 +131,35 @@ except Exception as e:
     st.error(f"Failed to initialize Groq client: {e}")
     st.stop()
 
-def generate_html_cookbook(recipes):
+def generate_html_cookbook(recipes, title="My Personal Cookbook"):
     """Generate beautiful HTML cookbook from recipes."""
-    html = """<!DOCTYPE html>
+    css = """
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background: #f5f5f5; color: #333; }
+        .header { text-align: center; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 10px; margin-bottom: 30px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .recipe { background: white; margin: 20px 0; padding: 25px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); break-inside: avoid; }
+        .recipe-title { font-size: 28px; font-weight: bold; color: #2c3e50; margin-bottom: 20px; border-bottom: 3px solid #3498db; padding-bottom: 10px; }
+        .section-title { font-size: 20px; font-weight: bold; color: #34495e; margin: 20px 0 10px 0; }
+        .ingredients { background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 10px 0; }
+        .ingredient { margin: 5px 0; padding-left: 20px; position: relative; }
+        .ingredient:before { content: "•"; color: #3498db; font-weight: bold; position: absolute; left: 0; }
+        .steps { counter-reset: step-counter; }
+        .step { margin: 10px 0; padding-left: 30px; position: relative; line-height: 1.6; }
+        .step:before { counter-increment: step-counter; content: counter(step-counter) "."; color: #e74c3c; font-weight: bold; position: absolute; left: 0; width: 25px; text-align: center; }
+        @media print { body { background: white; } .recipe { break-inside: avoid; } }
+        @media (max-width: 600px) { body { padding: 10px; } .recipe { padding: 15px; } .recipe-title { font-size: 24px; } }
+    """
+
+    html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My Personal Cookbook</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-            background: #f5f5f5;
-            color: #333;
-        }
-        .header {
-            text-align: center;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 30px;
-            border-radius: 10px;
-            margin-bottom: 30px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-        .recipe {
-            background: white;
-            margin: 20px 0;
-            padding: 25px;
-            border-radius: 10px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            break-inside: avoid;
-        }
-        .recipe-title {
-            font-size: 28px;
-            font-weight: bold;
-            color: #2c3e50;
-            margin-bottom: 20px;
-            border-bottom: 3px solid #3498db;
-            padding-bottom: 10px;
-        }
-        .section-title {
-            font-size: 20px;
-            font-weight: bold;
-            color: #34495e;
-            margin: 20px 0 10px 0;
-        }
-        .ingredients {
-            background: #f8f9fa;
-            padding: 15px;
-            border-radius: 8px;
-            margin: 10px 0;
-        }
-        .ingredient {
-            margin: 5px 0;
-            padding-left: 20px;
-            position: relative;
-        }
-        .ingredient:before {
-            content: "•";
-            color: #3498db;
-            font-weight: bold;
-            position: absolute;
-            left: 0;
-        }
-        .steps {
-            counter-reset: step-counter;
-        }
-        .step {
-            margin: 10px 0;
-            padding-left: 30px;
-            position: relative;
-            line-height: 1.6;
-        }
-        .step:before {
-            counter-increment: step-counter;
-            content: counter(step-counter) ".";
-            color: #e74c3c;
-            font-weight: bold;
-            position: absolute;
-            left: 0;
-            width: 25px;
-            text-align: center;
-        }
-        @media print {
-            body { background: white; }
-            .recipe { break-inside: avoid; }
-        }
-        @media (max-width: 600px) {
-            body { padding: 10px; }
-            .recipe { padding: 15px; }
-            .recipe-title { font-size: 24px; }
-        }
-    </style>
+    <title>{title}</title>
+    <style>{css}</style>
 </head>
 <body>
     <div class="header">
-        <h1>My Personal Cookbook</h1>
+        <h1>{title}</h1>
         <p>Created with AI - Perfect for mobile and printing</p>
     </div>
 """
@@ -356,6 +286,17 @@ if st.session_state.recipes:
     for i, r in enumerate(st.session_state.recipes):
         st.write(f"**{r.get('title', 'Untitled')}** - {len(r.get('ingredients', []))} ingredients")
 
+    # Cookbook title input
+    if "cookbook_title" not in st.session_state:
+        st.session_state.cookbook_title = "My Personal Cookbook"
+
+    cookbook_title = st.text_input(
+        "Cookbook Title:",
+        value=st.session_state.cookbook_title,
+        help="Customize the title of your generated cookbook"
+    )
+    st.session_state.cookbook_title = cookbook_title
+
     if st.button("Generate & Download Cookbook"):
         # Check if we have recipes
         if not st.session_state.recipes:
@@ -364,7 +305,7 @@ if st.session_state.recipes:
             st.write(f"Found {len(st.session_state.recipes)} recipes to process")
 
             # Generate beautiful HTML cookbook
-            html_content = generate_html_cookbook(st.session_state.recipes)
+            html_content = generate_html_cookbook(st.session_state.recipes, st.session_state.cookbook_title)
 
             # Convert to bytes for download
             html_bytes = html_content.encode('utf-8')
