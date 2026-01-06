@@ -43,7 +43,11 @@ def parse_recipe_json(response_text):
     json_text = text[start:end]
 
     try:
-        return json.loads(json_text)
+        recipe = json.loads(json_text)
+        # Clean up double numbering in steps
+        if 'steps' in recipe and recipe['steps']:
+            recipe['steps'] = [clean_step_numbering(step) for step in recipe['steps']]
+        return recipe
     except json.JSONDecodeError as e:
         # Try to fix common issues
         # Remove trailing commas before closing braces/brackets
@@ -51,7 +55,11 @@ def parse_recipe_json(response_text):
 
         # Try parsing again
         try:
-            return json.loads(json_text)
+            recipe = json.loads(json_text)
+            # Clean up double numbering in steps
+            if 'steps' in recipe and recipe['steps']:
+                recipe['steps'] = [clean_step_numbering(step) for step in recipe['steps']]
+            return recipe
         except json.JSONDecodeError:
             # As a last resort, try to extract basic structure manually
             title_match = re.search(r'"title"\s*:\s*"([^"]*)"', json_text, re.IGNORECASE)
@@ -71,11 +79,23 @@ def parse_recipe_json(response_text):
                     # Extract steps
                     steps_text = steps_match.group(1)
                     steps = re.findall(r'"([^"]*)"', steps_text)
-                    recipe["steps"] = steps
+                    # Clean up double numbering
+                    recipe["steps"] = [clean_step_numbering(step) for step in steps]
 
                 return recipe
 
             raise e
+
+def clean_step_numbering(step_text):
+    """Clean up double numbering in step text (e.g., '1. 1. Do something' -> '1. Do something')."""
+    if not step_text:
+        return step_text
+
+    # Pattern to match double numbering like "1. 1. " or "2. 2. "
+    double_number_pattern = r'^(\d+)\.\s+\1\.\s+'
+    cleaned = re.sub(double_number_pattern, r'\1. ', step_text.strip())
+
+    return cleaned
 
 # Initialize Groq client
 try:
@@ -291,7 +311,7 @@ if st.button("Extract Recipe(s)"):
                     messages=[{
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": "Extract recipe EXACTLY. Output ONLY valid JSON, no extra text/markdown. Preserve EVERY quantity, unit, fraction, and full original phrasing verbatim in ingredients (e.g., \"2½ cups (300g) unsalted butter, softened\"). Number steps sequentially. Format precisely: {\"title\": \"Title\", \"ingredients\": [\"full ingredient line with quantity\", ...], \"steps\": [\"1. Full step\", ...]}"},
+                            {"type": "text", "text": "Extract recipe EXACTLY. Output ONLY valid JSON, no extra text/markdown. Preserve EVERY quantity, unit, fraction, and full original phrasing verbatim in ingredients (e.g., \"2½ cups (300g) unsalted butter, softened\"). Extract steps as they appear WITHOUT adding your own numbering. If steps are already numbered in the image, keep them as-is. Format precisely: {\"title\": \"Title\", \"ingredients\": [\"full ingredient line with quantity\", ...], \"steps\": [\"Full step text as appears in image\", ...]}"},
                             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}}
                         ]
                     }],
@@ -313,7 +333,7 @@ if st.button("Extract Recipe(s)"):
                     model="llama-3.3-70b-versatile",  # Latest free-tier 70B text model
                     messages=[{
                         "role": "user",
-                        "content": "Extract recipe EXACTLY from this text. Output ONLY valid JSON, no extra text/markdown/explanation. Preserve EVERY quantity, unit, fraction, and full original phrasing verbatim in each ingredient (critical for accuracy — never simplify or omit). Number steps if needed. Exact format:\n{\"title\": \"Recipe Title\", \"ingredients\": [\"full ingredient line with quantity\", ...], \"steps\": [\"1. Full step\", ...]}\n\nText:\n" + text_input
+                        "content": "Extract recipe EXACTLY from this text. Output ONLY valid JSON, no extra text/markdown/explanation. Preserve EVERY quantity, unit, fraction, and full original phrasing verbatim in each ingredient (critical for accuracy — never simplify or omit). Extract steps as they appear in the original text WITHOUT adding your own numbering or prefixes. If steps are already numbered in the source, keep them as-is. Exact format:\n{\"title\": \"Recipe Title\", \"ingredients\": [\"full ingredient line with quantity\", ...], \"steps\": [\"Full step text as appears in source\", ...]}\n\nText:\n" + text_input
                     }],
                     max_tokens=1500
                 )
