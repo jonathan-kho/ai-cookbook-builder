@@ -265,83 +265,73 @@ uploaded_files = st.file_uploader("Upload recipe images/photos/handwritten notes
 text_input = st.text_area("Or paste recipe text here")
 
 if st.button("Extract Recipe(s)"):
-    with st.spinner("Extracting with AI..."):
+    with st.spinner("Extracting with high-fidelity free models..."):
         new_recipes = []
         total_tokens = 0
 
-        # Vision for images
+        # Improved vision extraction
         for file in uploaded_files:
             try:
-                # Validate and process image
                 img = Image.open(file)
-                # Convert to RGB if necessary (handles PNG with transparency)
                 if img.mode != 'RGB':
                     img = img.convert('RGB')
-                # Resize large images to prevent API limits (max ~4MB base64)
-                max_size = (1024, 1024)
+                max_size = (2048, 2048)  # Preserve text detail
                 if img.size[0] > max_size[0] or img.size[1] > max_size[1]:
                     img.thumbnail(max_size, Image.Resampling.LANCZOS)
                 buffered = io.BytesIO()
-                img.save(buffered, format="JPEG", quality=85)
+                img.save(buffered, format="JPEG", quality=95)
                 base64_img = base64.b64encode(buffered.getvalue()).decode()
-            except Exception as img_error:
-                st.error(f"Failed to process image {file.name}: {str(img_error)[:50]}")
+            except Exception as e:
+                st.error(f"Image error {file.name}: {e}")
                 continue
 
             try:
                 response = client.chat.completions.create(
-                    model="llava-v1.5-7b-4096-preview",  # Groq vision model
+                    model="llama-3.2-11b-vision-preview",  # Strong free vision model
                     messages=[{
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": "Extract the recipe from this image and output ONLY valid JSON with no extra text or explanation. Format: {\"title\": \"Recipe Title\", \"ingredients\": [\"ingredient 1\", \"ingredient 2\"], \"steps\": [\"1. First step\", \"2. Second step\"]}. Read all text carefully."},
+                            {"type": "text", "text": "Extract recipe EXACTLY. Output ONLY valid JSON, no extra text/markdown. Preserve EVERY quantity, unit, fraction, and full original phrasing verbatim in ingredients (e.g., \"2½ cups (300g) unsalted butter, softened\"). Number steps sequentially. Format precisely: {\"title\": \"Title\", \"ingredients\": [\"full ingredient line with quantity\", ...], \"steps\": [\"1. Full step\", ...]}"},
                             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}}
                         ]
                     }],
-                    max_tokens=500
+                    max_tokens=1500,
+                    response_format={"type": "json_object"}  # Enforced JSON
                 )
-            except Exception as api_error:
-                st.error(f"API error processing image {file.name}: {str(api_error)[:100]}")
-                continue
-            try:
                 recipe = parse_recipe_json(response.choices[0].message.content)
-                # Validate recipe structure
-                if isinstance(recipe, dict) and 'title' in recipe:
+                if 'title' in recipe and recipe.get('ingredients'):
                     new_recipes.append(recipe)
                     total_tokens += response.usage.total_tokens
                 else:
-                    st.error(f"Invalid recipe format from image {file.name}")
+                    st.warning(f"Incomplete vision extraction {file.name}")
             except Exception as e:
-                st.error(f"Failed to extract recipe from image: {str(e)[:100]}")
+                st.error(f"Vision API error {file.name}: {e}")
 
-        # Text-only model for pasted text
+        # Upgraded text extraction (free 70B model)
         if text_input:
             try:
                 response = client.chat.completions.create(
-                    model="llama-3.1-8b-instant",  # Fast text model
-                    messages=[{"role": "user", "content": f"Extract the recipe from this text and output ONLY a JSON object with this exact format, no extra text, no markdown:\n\n{{\"title\": \"Recipe Title Here\", \"ingredients\": [\"ingredient 1\", \"ingredient 2\", \"etc\"], \"steps\": [\"1. First step\", \"2. Second step\", \"etc\"]}}\n\nRecipe text to extract from:\n{text_input}"}],
-                    max_tokens=800  # Increased for complex recipes
+                    model="llama3-70b-8192",  # Strongest free-tier text model (70B)
+                    messages=[{
+                        "role": "user",
+                        "content": "Extract recipe EXACTLY from this text. Output ONLY valid JSON, no extra text/markdown/explanation. Preserve EVERY quantity, unit, fraction, and full original phrasing verbatim in each ingredient (critical for accuracy — never simplify or omit). Number steps if needed. Exact format:\n{\"title\": \"Recipe Title\", \"ingredients\": [\"full ingredient line with quantity\", ...], \"steps\": [\"1. Full step\", ...]}\n\nText:\n" + text_input
+                    }],
+                    max_tokens=1500,
+                    response_format={"type": "json_object"}
                 )
-            except Exception as api_error:
-                st.error(f"API error processing text: {str(api_error)[:100]}")
-                text_input = None  # Skip text processing
-            try:
                 recipe = parse_recipe_json(response.choices[0].message.content)
-                # Validate recipe structure
-                if isinstance(recipe, dict) and 'title' in recipe:
+                if 'title' in recipe and recipe.get('ingredients'):
                     new_recipes.append(recipe)
                     total_tokens += response.usage.total_tokens
                 else:
-                    st.error("Invalid recipe format from text")
+                    st.warning("Incomplete text extraction")
             except Exception as e:
-                st.error(f"Failed to extract recipe from text: {str(e)[:100]}")
+                st.error(f"Text API error: {e}")
 
-        # Only add valid recipes
-        valid_recipes = [r for r in new_recipes if isinstance(r, dict) and 'title' in r]
-        st.session_state.recipes.extend(valid_recipes)
+        st.session_state.recipes.extend(new_recipes)
         st.session_state.token_usage += total_tokens
-        st.success(f"Added {len(valid_recipes)} recipe(s)! Total recipes: {len(st.session_state.recipes)}")
-        st.info(f"Tokens used this extraction: {total_tokens} | Cumulative: {st.session_state.token_usage}")
+        st.success(f"Added {len(new_recipes)} valid recipe(s)! Total: {len(st.session_state.recipes)}")
+        st.info(f"Tokens this run: {total_tokens} | Cumulative: {st.session_state.token_usage}")
 
 if st.session_state.recipes:
     st.write("Current recipes in cookbook:")
