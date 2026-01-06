@@ -287,7 +287,7 @@ if st.button("Extract Recipe(s)"):
 
             try:
                 response = client.chat.completions.create(
-                    model="llama-3.2-11b-vision-preview",  # Strong free vision model
+                    model="meta-llama/llama-4-scout-17b-16e-instruct",  # Latest free vision model
                     messages=[{
                         "role": "user",
                         "content": [
@@ -295,8 +295,7 @@ if st.button("Extract Recipe(s)"):
                             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}}
                         ]
                     }],
-                    max_tokens=1500,
-                    response_format={"type": "json_object"}  # Enforced JSON
+                    max_tokens=1500
                 )
                 recipe = parse_recipe_json(response.choices[0].message.content)
                 if 'title' in recipe and recipe.get('ingredients'):
@@ -311,13 +310,12 @@ if st.button("Extract Recipe(s)"):
         if text_input:
             try:
                 response = client.chat.completions.create(
-                    model="llama3-70b-8192",  # Strongest free-tier text model (70B)
+                    model="llama-3.3-70b-versatile",  # Latest free-tier 70B text model
                     messages=[{
                         "role": "user",
                         "content": "Extract recipe EXACTLY from this text. Output ONLY valid JSON, no extra text/markdown/explanation. Preserve EVERY quantity, unit, fraction, and full original phrasing verbatim in each ingredient (critical for accuracy — never simplify or omit). Number steps if needed. Exact format:\n{\"title\": \"Recipe Title\", \"ingredients\": [\"full ingredient line with quantity\", ...], \"steps\": [\"1. Full step\", ...]}\n\nText:\n" + text_input
                     }],
-                    max_tokens=1500,
-                    response_format={"type": "json_object"}
+                    max_tokens=1500
                 )
                 recipe = parse_recipe_json(response.choices[0].message.content)
                 if 'title' in recipe and recipe.get('ingredients'):
