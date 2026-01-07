@@ -204,18 +204,21 @@ def generate_html_cookbook(recipes, title="My Personal Cookbook"):
 
     return html
 
-st.title("Free AI Personal Cookbook Builder v0.1")
+st.title("AI Cookbook Builder")
 
-if "recipes" not in st.session_state or not isinstance(st.session_state.recipes, list):
+# Initialize session state
+if "recipes" not in st.session_state:
     st.session_state.recipes = []
-if "token_usage" not in st.session_state or not isinstance(st.session_state.token_usage, (int, float)):
+if "token_usage" not in st.session_state:
     st.session_state.token_usage = 0
 
-uploaded_files = st.file_uploader("Upload recipe images/photos/handwritten notes (multiple OK)", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
-text_input = st.text_area("Or paste recipe text here")
+st.markdown("Upload recipe photos or paste recipe text to extract and create beautiful cookbooks.")
 
-if st.button("Extract Recipe(s)"):
-    with st.spinner("Extracting with high-fidelity free models..."):
+uploaded_files = st.file_uploader("Recipe photos", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
+text_input = st.text_area("Or paste recipe text")
+
+if st.button("🔍 Extract Recipes", use_container_width=True):
+    with st.spinner("Analyzing recipes..."):
         new_recipes = []
         total_tokens = 0
 
@@ -232,7 +235,7 @@ if st.button("Extract Recipe(s)"):
                 img.save(buffered, format="JPEG", quality=95)
                 base64_img = base64.b64encode(buffered.getvalue()).decode()
             except Exception as e:
-                st.error(f"Image error {file.name}: {e}")
+                st.error(f"❌ Failed to process {file.name}. Try another image.")
                 continue
 
             try:
@@ -252,9 +255,9 @@ if st.button("Extract Recipe(s)"):
                     new_recipes.append(recipe)
                     total_tokens += response.usage.total_tokens
                 else:
-                    st.warning(f"Incomplete vision extraction {file.name}")
+                    st.warning(f"Could not extract complete recipe from {file.name}")
             except Exception as e:
-                st.error(f"Vision API error {file.name}: {e}")
+                st.error("❌ Image processing failed. Try a different image.")
 
         # Upgraded text extraction (free 70B model)
         if text_input:
@@ -272,55 +275,58 @@ if st.button("Extract Recipe(s)"):
                     new_recipes.append(recipe)
                     total_tokens += response.usage.total_tokens
                 else:
-                    st.warning("Incomplete text extraction")
+                    st.warning("Could not extract complete recipe from text")
             except Exception as e:
-                st.error(f"Text API error: {e}")
+                st.error("❌ Text processing failed. Please check your input.")
 
         st.session_state.recipes.extend(new_recipes)
         st.session_state.token_usage += total_tokens
-        st.success(f"Added {len(new_recipes)} valid recipe(s)! Total: {len(st.session_state.recipes)}")
-        st.info(f"Tokens this run: {total_tokens} | Cumulative: {st.session_state.token_usage}")
+        st.success(f"✅ Added {len(new_recipes)} recipe(s) to your collection!")
 
 if st.session_state.recipes:
-    st.write("Current recipes in cookbook:")
-    for i, r in enumerate(st.session_state.recipes):
-        st.write(f"**{r.get('title', 'Untitled')}** - {len(r.get('ingredients', []))} ingredients")
+    st.markdown(f"**📚 {len(st.session_state.recipes)} recipes collected**")
 
-    # Cookbook title input
-    if "cookbook_title" not in st.session_state:
-        st.session_state.cookbook_title = "My Personal Cookbook"
+    with st.expander("View recipes", expanded=False):
+        for i, r in enumerate(st.session_state.recipes):
+            st.markdown(f"**{r.get('title', 'Untitled')}** - {len(r.get('ingredients', []))} ingredients")
 
-    cookbook_title = st.text_input(
-        "Cookbook Title:",
-        value=st.session_state.cookbook_title,
-        help="Customize the title of your generated cookbook"
-    )
-    st.session_state.cookbook_title = cookbook_title
+    # Cookbook customization
+    col1, col2 = st.columns([2, 1])
 
-    if st.button("Generate & Download Cookbook"):
-        # Check if we have recipes
-        if not st.session_state.recipes:
-            st.error("No recipes to generate cookbook from. Please extract some recipes first.")
-        else:
-            st.write(f"Found {len(st.session_state.recipes)} recipes to process")
+    with col1:
+        if "cookbook_title" not in st.session_state:
+            st.session_state.cookbook_title = "My Personal Cookbook"
 
-            # Generate beautiful HTML cookbook
-            html_content = generate_html_cookbook(st.session_state.recipes, st.session_state.cookbook_title)
+        cookbook_title = st.text_input(
+            "Cookbook Title",
+            value=st.session_state.cookbook_title
+        )
+        st.session_state.cookbook_title = cookbook_title
 
-            # Convert to bytes for download
-            html_bytes = html_content.encode('utf-8')
+    with col2:
+        if st.button("📖 Generate Cookbook", use_container_width=True):
+            if not st.session_state.recipes:
+                st.error("Please extract some recipes first.")
+            else:
+                # Generate beautiful HTML cookbook
+                html_content = generate_html_cookbook(st.session_state.recipes, st.session_state.cookbook_title)
 
-            st.download_button(
-                "Download Cookbook (HTML)",
-                html_bytes,
-                "my_cookbook.html",
-                "text/html"
-            )
-            st.success("Cookbook ready! Download as HTML for perfect mobile viewing.")
+                # Convert to bytes for download
+                html_bytes = html_content.encode('utf-8')
 
-            # Also show preview
-            st.markdown("### Preview:")
-            st.html(html_content)
+                st.download_button(
+                    "⬇️ Download Cookbook",
+                    html_bytes,
+                    f"{cookbook_title.lower().replace(' ', '_')}.html",
+                    "text/html",
+                    use_container_width=True
+                )
+                st.success("✅ Cookbook ready for download!")
 
-st.caption("v0.1 - Free via Groq API (rate limits apply). For testing only.")
-st.info(f"Total tokens used in session: {st.session_state.token_usage}")
+                # Show preview in expander
+                with st.expander("Preview", expanded=False):
+                    st.html(html_content)
+
+# Clean, minimal footer
+st.markdown("---")
+st.markdown("*Powered by AI • Free to use • Mobile-friendly*")
