@@ -99,6 +99,17 @@ def clean_step_numbering(step_text):
 
     return cleaned
 
+def strip_step_numbering(step_text):
+    """Remove numbering from the beginning of step text (e.g., '1. Do something' -> 'Do something')."""
+    if not step_text:
+        return step_text
+
+    # Pattern to match single numbering like "1. ", "2. ", etc.
+    single_number_pattern = r'^\d+\.\s+'
+    cleaned = re.sub(single_number_pattern, '', step_text.strip())
+
+    return cleaned
+
 # Initialize Groq client
 try:
     # Try Streamlit secrets first
@@ -233,10 +244,10 @@ def generate_docx_cookbook(recipes):
             doc.add_paragraph(ing, style='List Bullet')
 
         doc.add_heading('Instructions', level=2)
-        for i, step in enumerate(steps, 1):
-            p = doc.add_paragraph(style='List Number')
-            p.add_run(f"{i}. ").bold = True
-            p.add_run(step)
+        for step in steps:
+            # Remove existing numbering since Word will add its own
+            clean_step = strip_step_numbering(step)
+            doc.add_paragraph(clean_step, style='List Number')
 
         doc.add_page_break()  # One recipe per page initially
 
