@@ -6,6 +6,8 @@ import base64
 import json
 import re
 import os
+from docx import Document
+from docx.shared import Inches
 
 def parse_recipe_json(response_text):
     """Parse JSON from AI response, with robust error handling."""
@@ -204,6 +206,42 @@ def generate_html_cookbook(recipes, title="My Personal Cookbook"):
 
     return html
 
+def generate_docx_cookbook(recipes):
+    doc = Document()
+
+    # Set margins for print-friendly layout
+    section = doc.sections[0]
+    section.top_margin = Inches(1)
+    section.bottom_margin = Inches(1)
+    section.left_margin = Inches(1)
+    section.right_margin = Inches(1)
+
+    # Title page
+    doc.add_heading('My Personal Cookbook', 0).alignment = 1  # Centered
+    doc.add_paragraph('Created with AI • Edit me in Google Docs or Word • Add photos & cover!')
+    doc.add_page_break()
+
+    for recipe in recipes:
+        title = recipe.get('title', 'Untitled Recipe')
+        ingredients = recipe.get('ingredients', [])
+        steps = recipe.get('steps', [])
+
+        doc.add_heading(title, level=1)
+
+        doc.add_heading('Ingredients', level=2)
+        for ing in ingredients:
+            doc.add_paragraph(ing, style='List Bullet')
+
+        doc.add_heading('Instructions', level=2)
+        for i, step in enumerate(steps, 1):
+            p = doc.add_paragraph(style='List Number')
+            p.add_run(f"{i}. ").bold = True
+            p.add_run(step)
+
+        doc.add_page_break()  # One recipe per page initially
+
+    return doc
+
 st.title("AI Cookbook Builder")
 
 # Initialize session state
@@ -304,28 +342,30 @@ if st.session_state.recipes:
         st.session_state.cookbook_title = cookbook_title
 
     with col2:
-        if st.button("📖 Generate Cookbook", use_container_width=True):
+        if st.button("Generate & Download Cookbook"):
             if not st.session_state.recipes:
-                st.error("Please extract some recipes first.")
+                st.error("No recipes yet!")
             else:
-                # Generate beautiful HTML cookbook
-                html_content = generate_html_cookbook(st.session_state.recipes, st.session_state.cookbook_title)
-
-                # Convert to bytes for download
+                # HTML preview (keep existing)
+                html_content = generate_html_cookbook(st.session_state.recipes)
                 html_bytes = html_content.encode('utf-8')
+                st.download_button("Download Preview (HTML)", html_bytes, "preview_cookbook.html", "text/html")
+                st.markdown("### Live Preview")
+                st.html(html_content)
+
+                # New: DOCX editable download
+                doc = generate_docx_cookbook(st.session_state.recipes)
+                docx_bytes = io.BytesIO()
+                doc.save(docx_bytes)
+                docx_bytes.seek(0)
 
                 st.download_button(
-                    "⬇️ Download Cookbook",
-                    html_bytes,
-                    f"{cookbook_title.lower().replace(' ', '_')}.html",
-                    "text/html",
-                    use_container_width=True
+                    "Download Editable Cookbook (DOCX)",
+                    docx_bytes.getvalue(),
+                    "my_editable_cookbook.docx",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
-                st.success("✅ Cookbook ready for download!")
-
-                # Show preview in expander
-                with st.expander("Preview", expanded=False):
-                    st.html(html_content)
+                st.success("DOCX ready! Edit → Export PDF → Print professionally.")
 
 # Clean, minimal footer
 st.markdown("---")
