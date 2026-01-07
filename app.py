@@ -244,10 +244,12 @@ def generate_docx_cookbook(recipes):
             doc.add_paragraph(ing, style='List Bullet')
 
         doc.add_heading('Instructions', level=2)
-        for step in steps:
-            # Remove existing numbering since Word will add its own
+        for i, step in enumerate(steps, 1):
+            # Remove existing numbering and manually add our own
             clean_step = strip_step_numbering(step)
-            doc.add_paragraph(clean_step, style='List Number')
+            p = doc.add_paragraph()
+            p.add_run(f"{i}. ").bold = True
+            p.add_run(clean_step)
 
         doc.add_page_break()  # One recipe per page initially
 
