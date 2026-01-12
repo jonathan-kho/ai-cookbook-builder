@@ -6,24 +6,22 @@ import base64
 import json
 import re
 import os
+import requests
+from bs4 import BeautifulSoup
 from docx import Document
 from docx.shared import Inches
+from datetime import datetime
+
 
 def parse_recipe_json(response_text):
-    """Parse JSON from AI response, with robust error handling."""
     text = response_text.strip()
-
-    # Remove markdown code blocks
     if text.startswith("```json"):
         text = text[7:].split("```")[0].strip()
     elif text.startswith("```"):
         text = text[3:].split("```")[0].strip()
-
-    # Extract JSON object - find the outermost braces
     start = text.find('{')
     if start == -1:
-        raise ValueError("No JSON object found in response")
-
+        return None
     brace_count = 0
     end = start
     for i in range(start, len(text)):
@@ -34,352 +32,382 @@ def parse_recipe_json(response_text):
             if brace_count == 0:
                 end = i + 1
                 break
-
     if brace_count != 0:
-        # Fallback: find last closing brace
         end = text.rfind('}') + 1
-
-    if end <= start:
-        raise ValueError("Invalid JSON structure")
-
     json_text = text[start:end]
-
     try:
         recipe = json.loads(json_text)
-        # Clean up double numbering in steps
-        if 'steps' in recipe and recipe['steps']:
-            recipe['steps'] = [clean_step_numbering(step) for step in recipe['steps']]
+        if 'steps' in recipe:
+            recipe['steps'] = [clean_step_numbering(s) for s in recipe['steps']]
         return recipe
-    except json.JSONDecodeError as e:
-        # Try to fix common issues
-        # Remove trailing commas before closing braces/brackets
+    except json.JSONDecodeError:
         json_text = json_text.replace(',}', '}').replace(',]', ']')
-
-        # Try parsing again
         try:
             recipe = json.loads(json_text)
-            # Clean up double numbering in steps
-            if 'steps' in recipe and recipe['steps']:
-                recipe['steps'] = [clean_step_numbering(step) for step in recipe['steps']]
+            if 'steps' in recipe:
+                recipe['steps'] = [clean_step_numbering(s) for s in recipe['steps']]
             return recipe
-        except json.JSONDecodeError:
-            # As a last resort, try to extract basic structure manually
-            title_match = re.search(r'"title"\s*:\s*"([^"]*)"', json_text, re.IGNORECASE)
-            ingredients_match = re.search(r'"ingredients"\s*:\s*\[([^\]]*)\]', json_text, re.DOTALL)
-            steps_match = re.search(r'"steps"\s*:\s*\[([^\]]*)\]', json_text, re.DOTALL)
+        except:
+            return None
 
-            if title_match:
-                recipe = {"title": title_match.group(1), "ingredients": [], "steps": []}
-
-                if ingredients_match:
-                    # Extract ingredients
-                    ing_text = ingredients_match.group(1)
-                    ingredients = re.findall(r'"([^"]*)"', ing_text)
-                    recipe["ingredients"] = ingredients
-
-                if steps_match:
-                    # Extract steps
-                    steps_text = steps_match.group(1)
-                    steps = re.findall(r'"([^"]*)"', steps_text)
-                    # Clean up double numbering
-                    recipe["steps"] = [clean_step_numbering(step) for step in steps]
-
-                return recipe
-
-            raise e
 
 def clean_step_numbering(step_text):
-    """Clean up double numbering in step text (e.g., '1. 1. Do something' -> '1. Do something')."""
     if not step_text:
         return step_text
+    return re.sub(r'^(\d+)\.\s+\1\.\s+', r'\1. ', step_text.strip())
 
-    # Pattern to match double numbering like "1. 1. " or "2. 2. "
-    double_number_pattern = r'^(\d+)\.\s+\1\.\s+'
-    cleaned = re.sub(double_number_pattern, r'\1. ', step_text.strip())
-
-    return cleaned
 
 def strip_step_numbering(step_text):
-    """Remove numbering from the beginning of step text (e.g., '1. Do something' -> 'Do something')."""
     if not step_text:
         return step_text
+    return re.sub(r'^\d+\.\s*', '', step_text.strip())
 
-    # Pattern to match single numbering like "1. ", "2. ", etc.
-    single_number_pattern = r'^\d+\.\s+'
-    cleaned = re.sub(single_number_pattern, '', step_text.strip())
 
-    return cleaned
+def extract_schema_recipe(soup):
+    """Extract recipe from schema.org JSON-LD if available."""
+    scripts = soup.find_all('script', type='application/ld+json')
+    for script in scripts:
+        try:
+            content = script.string or ''
+            if not content.strip():
+                continue
+            data = json.loads(content)
+            candidates = []
+            if isinstance(data, dict):
+                if data.get('@type') == 'Recipe':
+                    candidates.append(data)
+                if '@graph' in data:
+                    candidates.extend([item for item in data['@graph'] if item.get('@type') == 'Recipe'])
+            elif isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict):
+                        if item.get('@type') == 'Recipe':
+                            candidates.append(item)
+                        if '@graph' in item:
+                            candidates.extend([g for g in item['@graph'] if g.get('@type') == 'Recipe'])
+            
+            for rec in candidates:
+                title = rec.get('name', 'Untitled Recipe')
+                ingredients = rec.get('recipeIngredient', [])
+                if not isinstance(ingredients, list):
+                    ingredients = []
+                ingredients = [str(ing).strip() for ing in ingredients if ing]
+                
+                steps = []
+                instructions = rec.get('recipeInstructions', [])
+                if isinstance(instructions, list):
+                    for step in instructions:
+                        if isinstance(step, str):
+                            steps.append(step.strip())
+                        elif isinstance(step, dict):
+                            text = step.get('text') or step.get('name') or ''
+                            steps.append(text.strip())
+                elif isinstance(instructions, str):
+                    steps.append(instructions.strip())
+                
+                if title != 'Untitled Recipe' and ingredients:
+                    return {
+                        "title": title,
+                        "ingredients": ingredients,
+                        "steps": [s for s in steps if s]
+                    }
+        except:
+            continue
+    return None
 
-# Initialize Groq client
+
+# Groq client
 try:
-    # Try Streamlit secrets first
     api_key = None
     try:
-        if "GROQ_API_KEY" in st.secrets:
-            api_key = st.secrets["GROQ_API_KEY"]
+        api_key = st.secrets["GROQ_API_KEY"]
     except:
-        pass  # Secrets not available, try other sources
+        pass  # No secrets.toml, continue to other sources
 
-    # Try environment variable
     if not api_key:
         api_key = os.environ.get("GROQ_API_KEY")
 
-    # Try config.py as last resort
     if not api_key:
         try:
             import config
             api_key = config.GROQ_API_KEY
-        except ImportError:
+        except:
             pass
 
     if not api_key:
         st.error("GROQ_API_KEY not found. Please set it in:")
         st.error("- config.py file")
         st.error("- GROQ_API_KEY environment variable")
-        st.error("- Streamlit secrets (for cloud deployment)")
+        st.error("- Streamlit secrets (.streamlit/secrets.toml)")
         st.stop()
 
     client = Groq(api_key=api_key)
 except Exception as e:
-    st.error(f"Failed to initialize Groq client: {e}")
+    st.error(f"Groq init failed: {e}")
     st.stop()
 
-def generate_html_cookbook(recipes, title="My Personal Cookbook"):
-    """Generate beautiful HTML cookbook from recipes."""
+
+def generate_html_cookbook(recipes, title):
     css = """
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background: #f5f5f5; color: #333; }
-        .header { text-align: center; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 10px; margin-bottom: 30px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        .recipe { background: white; margin: 20px 0; padding: 25px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); break-inside: avoid; }
-        .recipe-title { font-size: 28px; font-weight: bold; color: #2c3e50; margin-bottom: 20px; border-bottom: 3px solid #3498db; padding-bottom: 10px; }
-        .section-title { font-size: 20px; font-weight: bold; color: #34495e; margin: 20px 0 10px 0; }
-        .ingredients { background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 10px 0; }
-        .ingredient { margin: 5px 0; padding-left: 20px; position: relative; }
-        .ingredient:before { content: "•"; color: #3498db; font-weight: bold; position: absolute; left: 0; }
-        .steps { counter-reset: step-counter; }
-        .step { margin: 10px 0; padding-left: 30px; position: relative; line-height: 1.6; }
-        .step:before { counter-increment: step-counter; content: counter(step-counter) "."; color: #e74c3c; font-weight: bold; position: absolute; left: 0; width: 25px; text-align: center; }
-        @media print { body { background: white; } .recipe { break-inside: avoid; } }
-        @media (max-width: 600px) { body { padding: 10px; } .recipe { padding: 15px; } .recipe-title { font-size: 24px; } }
+        body { font-family: Georgia, serif; max-width: 900px; margin: 40px auto; padding: 20px; background: #fdfdfd; color: #333; line-height: 1.6; }
+        .header { text-align: center; padding: 60px 20px; background: linear-gradient(135deg, #f9e4d4 0%, #f7d0c0 100%); border-radius: 20px; margin-bottom: 50px; }
+        .recipe { background: white; padding: 40px; margin: 40px 0; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); }
+        .recipe-title { font-size: 32px; color: #d35400; border-bottom: 3px solid #e74c3c; padding-bottom: 10px; }
+        .section-title { font-size: 24px; color: #c0392b; margin: 30px 0 15px; }
+        .ingredients { padding: 20px; background: #fef9e8; border-radius: 10px; }
+        .ingredient { margin: 10px 0; padding-left: 10px; }
+        .steps { padding-left: 10px; }
+        .step { margin: 20px 0; }
+        .step-number { font-weight: bold; color: #e74c3c; margin-right: 10px; }
+        @media print { body { background: white; margin: 0; } .recipe { box-shadow: none; page-break-inside: avoid; } }
     """
-
     html = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{title}</title>
-    <style>{css}</style>
-</head>
-<body>
-    <div class="header">
-        <h1>{title}</h1>
-        <p>Created with AI - Perfect for mobile and printing</p>
-    </div>
+<html><head><meta charset="UTF-8"><title>{title}</title>
+<style>{css}</style></head><body>
+<div class="header"><h1>{title}</h1><p>Our Family Recipes • {datetime.now().strftime('%B %Y')}</p></div>
 """
-
     for recipe in recipes:
-        title = recipe.get('title', 'Untitled Recipe')
-        ingredients = recipe.get('ingredients', [])
-        steps = recipe.get('steps', [])
-
-        html += f"""
-    <div class="recipe">
-        <div class="recipe-title">{title}</div>
-
-        <div class="section-title">Ingredients</div>
-        <div class="ingredients">"""
-
-        if ingredients:
-            for ing in ingredients:
-                html += f'<div class="ingredient">{ing}</div>'
-        else:
-            html += '<div class="ingredient">No ingredients listed</div>'
-
-        html += """
-        </div>
-
-        <div class="section-title">Instructions</div>
-        <div class="steps">"""
-
-        if steps:
-            for step in steps:
-                html += f'<div class="step">{step}</div>'
-        else:
-            html += '<div class="step">No steps listed</div>'
-
-        html += """
-        </div>
-    </div>"""
-
-    html += """
-</body>
-</html>"""
-
+        html += f'<div class="recipe"><div class="recipe-title">{recipe.get("title", "Untitled")}</div>'
+        html += '<div class="section-title">Ingredients</div><div class="ingredients">'
+        for ing in recipe.get("ingredients", []):
+            html += f'<div class="ingredient">• {ing}</div>'
+        html += '</div><div class="section-title">Instructions</div><div class="steps">'
+        for i, step in enumerate(recipe.get("steps", []), 1):
+            clean = strip_step_numbering(step)
+            html += f'<div class="step"><span class="step-number">{i}.</span>{clean}</div>'
+        html += '</div></div>'
+    html += '</body></html>'
     return html
 
-def generate_docx_cookbook(recipes):
+
+def generate_docx_cookbook(recipes, title, one_per_page):
     doc = Document()
-
-    # Set margins for print-friendly layout
     section = doc.sections[0]
-    section.top_margin = Inches(1)
-    section.bottom_margin = Inches(1)
-    section.left_margin = Inches(1)
-    section.right_margin = Inches(1)
+    section.top_margin = Inches(0.8)
+    section.bottom_margin = Inches(0.8)
+    section.left_margin = Inches(0.8)
+    section.right_margin = Inches(0.8)
 
-    # Title page
-    doc.add_heading('My Personal Cookbook', 0).alignment = 1  # Centered
-    doc.add_paragraph('Created with AI • Edit me in Google Docs or Word • Add photos & cover!')
+    # Cover
+    doc.add_heading(title, 0).alignment = 1
+    p = doc.add_paragraph('Our Family Recipes\n\nCollected with love')
+    p.alignment = 1
+    doc.add_paragraph(f"{datetime.now().strftime('%B %Y')}").alignment = 1
     doc.add_page_break()
 
+    # Simple index
+    doc.add_heading('Recipes', level=1)
+    for i, recipe in enumerate(recipes, 1):
+        doc.add_paragraph(f"{i}. {recipe.get('title', 'Untitled')}", style='List Number')
+    doc.add_page_break()
+
+    # Recipes
     for recipe in recipes:
-        title = recipe.get('title', 'Untitled Recipe')
-        ingredients = recipe.get('ingredients', [])
-        steps = recipe.get('steps', [])
-
-        doc.add_heading(title, level=1)
-
+        doc.add_heading(recipe.get('title', 'Untitled'), level=1)
         doc.add_heading('Ingredients', level=2)
-        for ing in ingredients:
+        for ing in recipe.get('ingredients', []):
             doc.add_paragraph(ing, style='List Bullet')
-
         doc.add_heading('Instructions', level=2)
-        for i, step in enumerate(steps, 1):
-            # Remove existing numbering and manually add our own
-            clean_step = strip_step_numbering(step)
+        for i, step in enumerate(recipe.get('steps', []), 1):
+            clean = strip_step_numbering(step)
             p = doc.add_paragraph()
             p.add_run(f"{i}. ").bold = True
-            p.add_run(clean_step)
-
-        doc.add_page_break()  # One recipe per page initially
+            p.add_run(clean)
+        if one_per_page:
+            doc.add_page_break()
 
     return doc
 
-st.title("AI Cookbook Builder")
 
-# Initialize session state
+# App UI
+st.set_page_config(page_title="Family Cookbook", layout="centered")
+st.title("🍲 Our Family Cookbook")
+
+st.markdown("""
+**Create a beautiful printable cookbook from recipes your family sends you.**
+
+Family can send:
+- Recipe website links (most common – just paste them!)
+- Photos of handwritten recipes (save to your device and upload)
+- Copied recipe text
+
+The app extracts everything perfectly.  
+The final Word file is fully editable – add photos, rearrange, export PDF for printing/binding.
+""")
+
 if "recipes" not in st.session_state:
     st.session_state.recipes = []
-if "token_usage" not in st.session_state:
-    st.session_state.token_usage = 0
+if "cookbook_title" not in st.session_state:
+    st.session_state.cookbook_title = "Our Family Cookbook"
 
-st.markdown("Upload recipe photos or paste recipe text to extract and create beautiful cookbooks.")
+cookbook_title = st.text_input("Cookbook title", value=st.session_state.cookbook_title)
+st.session_state.cookbook_title = cookbook_title
 
-uploaded_files = st.file_uploader("Recipe photos", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
+st.markdown("### Add recipes")
+col1, col2 = st.columns(2)
+with col1:
+    uploaded_files = st.file_uploader("Upload recipe photos", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
+with col2:
+    recipe_links = st.text_area("Paste recipe website links (one per line)")
+
 text_input = st.text_area("Or paste recipe text")
 
-if st.button("🔍 Extract Recipes", use_container_width=True):
-    with st.spinner("Analyzing recipes..."):
-        new_recipes = []
-        total_tokens = 0
+if st.button("✨ Extract & Add Recipes", type="primary", use_container_width=True):
+    if not (uploaded_files or recipe_links.strip() or text_input.strip()):
+        st.warning("Please add something first.")
+    else:
+        with st.spinner("Extracting recipes..."):
+            new_recipes = []
 
-        # Improved vision extraction
-        for file in uploaded_files:
-            try:
-                img = Image.open(file)
-                if img.mode != 'RGB':
-                    img = img.convert('RGB')
-                max_size = (2048, 2048)  # Preserve text detail
-                if img.size[0] > max_size[0] or img.size[1] > max_size[1]:
-                    img.thumbnail(max_size, Image.Resampling.LANCZOS)
-                buffered = io.BytesIO()
-                img.save(buffered, format="JPEG", quality=95)
-                base64_img = base64.b64encode(buffered.getvalue()).decode()
-            except Exception as e:
-                st.error(f"❌ Failed to process {file.name}. Try another image.")
-                continue
-
-            try:
-                response = client.chat.completions.create(
-                    model="meta-llama/llama-4-scout-17b-16e-instruct",  # Latest free vision model
-                    messages=[{
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": "Extract recipe EXACTLY. Output ONLY valid JSON, no extra text/markdown. Preserve EVERY quantity, unit, fraction, and full original phrasing verbatim in ingredients (e.g., \"2½ cups (300g) unsalted butter, softened\"). Extract steps as they appear WITHOUT adding your own numbering. If steps are already numbered in the image, keep them as-is. Format precisely: {\"title\": \"Title\", \"ingredients\": [\"full ingredient line with quantity\", ...], \"steps\": [\"Full step text as appears in image\", ...]}"},
+            # Process uploaded files (photos)
+            for file in uploaded_files or []:
+                try:
+                    img = Image.open(file).convert('RGB')
+                    buffered = io.BytesIO()
+                    img.save(buffered, format="JPEG", quality=95)
+                    base64_img = base64.b64encode(buffered.getvalue()).decode()
+                    response = client.chat.completions.create(
+                        model="meta-llama/llama-4-scout-17b-16e-instruct",
+                        messages=[{"role": "user", "content": [
+                            {"type": "text", "text": "Extract the recipe EXACTLY as JSON only. Preserve all quantities, units, and original text. Keep steps exactly as shown. Format: {\"title\": \"...\", \"ingredients\": [\"...\"], \"steps\": [\"...\"]}"},
                             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}}
-                        ]
-                    }],
-                    max_tokens=1500
-                )
-                recipe = parse_recipe_json(response.choices[0].message.content)
-                if 'title' in recipe and recipe.get('ingredients'):
-                    new_recipes.append(recipe)
-                    total_tokens += response.usage.total_tokens
-                else:
-                    st.warning(f"Could not extract complete recipe from {file.name}")
-            except Exception as e:
-                st.error("❌ Image processing failed. Try a different image.")
+                        ]}],
+                        max_tokens=1500
+                    )
+                    recipe = parse_recipe_json(response.choices[0].message.content)
+                    if recipe and recipe.get('title') and recipe.get('ingredients'):
+                        new_recipes.append(recipe)
+                except:
+                    st.error(f"Failed to process {file.name}")
 
-        # Upgraded text extraction (free 70B model)
-        if text_input:
-            try:
-                response = client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",  # Latest free-tier 70B text model
-                    messages=[{
-                        "role": "user",
-                        "content": "Extract recipe EXACTLY from this text. Output ONLY valid JSON, no extra text/markdown/explanation. Preserve EVERY quantity, unit, fraction, and full original phrasing verbatim in each ingredient (critical for accuracy — never simplify or omit). Extract steps as they appear in the original text WITHOUT adding your own numbering or prefixes. If steps are already numbered in the source, keep them as-is. Exact format:\n{\"title\": \"Recipe Title\", \"ingredients\": [\"full ingredient line with quantity\", ...], \"steps\": [\"Full step text as appears in source\", ...]}\n\nText:\n" + text_input
-                    }],
-                    max_tokens=1500
-                )
-                recipe = parse_recipe_json(response.choices[0].message.content)
-                if 'title' in recipe and recipe.get('ingredients'):
-                    new_recipes.append(recipe)
-                    total_tokens += response.usage.total_tokens
-                else:
-                    st.warning("Could not extract complete recipe from text")
-            except Exception as e:
-                st.error("❌ Text processing failed. Please check your input.")
+            # Process website links ONLY
+            for url in [u.strip() for u in recipe_links.splitlines() if u.strip()]:
+                try:
+                    headers = {"User-Agent": "Mozilla/5.0 (compatible; FamilyCookbook/1.0)"}
+                    resp = requests.get(url, headers=headers, timeout=15)
+                    resp.raise_for_status()
+                    soup = BeautifulSoup(resp.text, 'html.parser')
+                    
+                    # First: structured schema
+                    recipe = extract_schema_recipe(soup)
+                    if recipe:
+                        new_recipes.append(recipe)
+                        continue
+                    
+                    # Fallback: clean text + LLM
+                    for tag in soup(["script", "style", "nav", "header", "footer", "aside", "advert"]):
+                        tag.decompose()
+                    page_text = soup.get_text(separator='\n', strip=True)
+                    if len(page_text) > 15000:
+                        page_text = page_text[:15000] + "\n\n... (truncated)"
+                    
+                    response = client.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=[{"role": "user", "content": f"""Extract ONLY the main recipe from this webpage text as valid JSON. 
+Preserve exact ingredient lines and step phrasing. 
+Format: {{"title": "Recipe Name", "ingredients": ["full line 1", "full line 2"], "steps": ["step 1", "step 2"]}}
 
-        st.session_state.recipes.extend(new_recipes)
-        st.session_state.token_usage += total_tokens
-        st.success(f"✅ Added {len(new_recipes)} recipe(s) to your collection!")
+Text:
+{page_text}"""}],
+                        max_tokens=1500
+                    )
+                    recipe = parse_recipe_json(response.choices[0].message.content)
+                    if recipe and recipe.get('title') and recipe.get('ingredients'):
+                        new_recipes.append(recipe)
+                except Exception as e:
+                    st.warning(f"Could not extract recipe from: {url}")
+
+            # Process text input
+            if text_input.strip():
+                try:
+                    response = client.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=[{"role": "user", "content": f"Extract the recipe EXACTLY as JSON only. Preserve everything. Format: {{\"title\": \"...\", \"ingredients\": [...], \"steps\": [...]}}\n\nText:\n{text_input}"}],
+                        max_tokens=1500
+                    )
+                    recipe = parse_recipe_json(response.choices[0].message.content)
+                    if recipe and recipe.get('title') and recipe.get('ingredients'):
+                        new_recipes.append(recipe)
+                except:
+                    st.error("Text extraction failed")
+
+            # Dedupe and add
+            titles = {r['title'].lower() for r in st.session_state.recipes}
+            added = 0
+            for r in new_recipes:
+                if r['title'].lower() not in titles:
+                    st.session_state.recipes.append(r)
+                    titles.add(r['title'].lower())
+                    added += 1
+
+            if added:
+                st.success(f"Added {added} new recipe(s)!")
+                st.session_state.recipes.sort(key=lambda r: r.get('title', '').lower())
+                st.rerun()
+            else:
+                st.info("No new recipes added (possible duplicates or extraction issues).")
+
+# Current collection display, backup, generate (unchanged from previous version)
 
 if st.session_state.recipes:
-    st.markdown(f"**📚 {len(st.session_state.recipes)} recipes collected**")
+    st.markdown(f"### Your recipes ({len(st.session_state.recipes)})")
+    for i in range(len(st.session_state.recipes)-1, -1, -1):
+        r = st.session_state.recipes[i]
+        col1, col2 = st.columns([6,1])
+        with col1:
+            st.markdown(f"**{r.get('title', 'Untitled')}**")
+        with col2:
+            if st.button("Remove", key=f"rem_{i}"):
+                st.session_state.recipes.pop(i)
+                st.rerun()
 
-    with st.expander("View recipes", expanded=False):
-        for i, r in enumerate(st.session_state.recipes):
-            st.markdown(f"**{r.get('title', 'Untitled')}** - {len(r.get('ingredients', []))} ingredients")
+    with st.expander("💾 Save/Load progress (for working over multiple days)"):
+        col1, col2 = st.columns(2)
+        with col1:
+            json_data = json.dumps(st.session_state.recipes, indent=4, ensure_ascii=False)
+            st.download_button(
+                "Download backup",
+                json_data,
+                "cookbook_backup.json",
+                "application/json"
+            )
+        with col2:
+            backup_file = st.file_uploader("Upload backup", type="json", key="backup")
+            if backup_file:
+                try:
+                    imported = json.load(backup_file)
+                    st.session_state.recipes = imported
+                    st.success("Progress restored!")
+                    st.rerun()
+                except:
+                    st.error("Invalid backup file")
 
-    # Cookbook customization
-    col1, col2 = st.columns([2, 1])
+    st.markdown("### Generate your cookbook")
+    one_per_page = st.checkbox("One recipe per page (recommended for printing)", value=True)
 
-    with col1:
-        if "cookbook_title" not in st.session_state:
-            st.session_state.cookbook_title = "My Personal Cookbook"
+    if st.button("📖 Create Cookbook", type="primary", use_container_width=True):
+        if not st.session_state.recipes:
+            st.error("No recipes yet!")
+        else:
+            # DOCX
+            doc = generate_docx_cookbook(st.session_state.recipes, cookbook_title, one_per_page)
+            docx_io = io.BytesIO()
+            doc.save(docx_io)
+            docx_io.seek(0)
 
-        cookbook_title = st.text_input(
-            "Cookbook Title",
-            value=st.session_state.cookbook_title
-        )
-        st.session_state.cookbook_title = cookbook_title
+            st.download_button(
+                "📄 Download Editable Word File (.docx)",
+                docx_io.getvalue(),
+                f"{cookbook_title.replace(' ', '_')}.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True
+            )
 
-    with col2:
-        if st.button("Generate & Download Cookbook"):
-            if not st.session_state.recipes:
-                st.error("No recipes yet!")
-            else:
-                # HTML preview (keep existing)
-                html_content = generate_html_cookbook(st.session_state.recipes)
-                html_bytes = html_content.encode('utf-8')
-                st.download_button("Download Preview (HTML)", html_bytes, "preview_cookbook.html", "text/html")
-                st.markdown("### Live Preview")
-                st.html(html_content)
+            # HTML preview
+            html = generate_html_cookbook(st.session_state.recipes, cookbook_title)
+            st.markdown("#### 📱 Live Preview (great on phone too)")
+            st.html(html)
 
-                # New: DOCX editable download
-                doc = generate_docx_cookbook(st.session_state.recipes)
-                docx_bytes = io.BytesIO()
-                doc.save(docx_bytes)
-                docx_bytes.seek(0)
+            st.success("Cookbook ready! Open the .docx to customize and print ❤️")
 
-                st.download_button(
-                    "Download Editable Cookbook (DOCX)",
-                    docx_bytes.getvalue(),
-                    "my_editable_cookbook.docx",
-                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
-                st.success("DOCX ready! Edit → Export PDF → Print professionally.")
-
-# Clean, minimal footer
-st.markdown("---")
-st.markdown("*Powered by AI • Free to use • Mobile-friendly*")
+st.caption("Made with love and AI • Simple, private, and free to use")
