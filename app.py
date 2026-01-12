@@ -197,8 +197,8 @@ def generate_docx_cookbook(recipes, title, one_per_page):
 
     # Simple index
     doc.add_heading('Recipes', level=1)
-    for i, recipe in enumerate(recipes, 1):
-        doc.add_paragraph(f"{i}. {recipe.get('title', 'Untitled')}", style='List Number')
+    for recipe in recipes:
+        doc.add_paragraph(recipe.get('title', 'Untitled'), style='List Number')
     doc.add_page_break()
 
     # Recipes
