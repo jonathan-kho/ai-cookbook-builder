@@ -545,14 +545,14 @@ if st.session_state.recipes:
                     st.error("Invalid backup file")
 
     st.markdown("### Generate your cookbook")
-    col_style1, col_style2 = st.columns([1, 3])
-    with col_style1:
-        one_per_page = st.checkbox("One recipe per page (recommended for printing)", value=True)
-    with col_style2:
-        style = st.selectbox(
-            "Choose cookbook aesthetic",
-            ["Trendy Simple", "Old School Farmhouse", "The Food Lab"]
-        )
+
+    one_per_page = st.checkbox("One recipe per page (recommended for printing)", value=True)
+
+    style = st.radio(
+        "Cookbook aesthetic",
+        ["Trendy Simple", "Old School Farmhouse", "The Food Lab"],
+        horizontal=True
+    )
 
     if st.button("📖 Create Cookbook", type="primary", use_container_width=True):
         if not st.session_state.recipes:
