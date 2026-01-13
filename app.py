@@ -431,10 +431,10 @@ if st.button("✨ Extract & Add Recipes", type="primary", use_container_width=Tr
                     response = client.chat.completions.create(
                         model="meta-llama/llama-4-scout-17b-16e-instruct",
                         messages=[{"role": "user", "content": [
-                            {"type": "text", "text": "Extract the recipe EXACTLY as JSON only. Preserve all quantities, units, and original text. Keep steps exactly as shown. Format: {\"title\": \"...\", \"ingredients\": [\"...\"], \"steps\": [\"...\"]}"},
+                            {"type": "text", "text": "Extract the recipe EXACTLY as JSON only. Preserve all quantities, units, and original text COMPLETELY - do not truncate long ingredient lines. Keep steps exactly as shown. Format: {\"title\": \"...\", \"ingredients\": [\"...\"], \"steps\": [\"...\"]}"},
                             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}}
                         ]}],
-                        max_tokens=1500
+                        max_tokens=2500
                     )
                     recipe = parse_recipe_json(response.choices[0].message.content)
                     if recipe and recipe.get('title') and recipe.get('ingredients'):
@@ -465,8 +465,8 @@ if st.button("✨ Extract & Add Recipes", type="primary", use_container_width=Tr
                     
                     response = client.chat.completions.create(
                         model="llama-3.3-70b-versatile",
-                        messages=[{"role": "user", "content": f"""Extract ONLY the main recipe from this webpage text as valid JSON. 
-Preserve exact ingredient lines and step phrasing. 
+                        messages=[{"role": "user", "content": f"""Extract ONLY the main recipe from this webpage text as valid JSON.
+Preserve exact ingredient lines and step phrasing COMPLETELY - do not truncate any ingredient lines, even if they are long.
 Format: {{"title": "Recipe Name", "ingredients": ["full line 1", "full line 2"], "steps": ["step 1", "step 2"]}}
 
 Text:
@@ -484,7 +484,7 @@ Text:
                 try:
                     response = client.chat.completions.create(
                         model="llama-3.3-70b-versatile",
-                        messages=[{"role": "user", "content": f"Extract the recipe EXACTLY as JSON only. Preserve everything. Format: {{\"title\": \"...\", \"ingredients\": [...], \"steps\": [...]}}\n\nText:\n{text_input}"}],
+                        messages=[{"role": "user", "content": f"Extract the recipe EXACTLY as JSON only. Preserve everything COMPLETELY - do not truncate long ingredient lines. Format: {{\"title\": \"...\", \"ingredients\": [...], \"steps\": [...]}}\n\nText:\n{text_input}"}],
                         max_tokens=1500
                     )
                     recipe = parse_recipe_json(response.choices[0].message.content)
