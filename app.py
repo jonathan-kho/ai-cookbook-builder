@@ -9,7 +9,7 @@ import os
 import requests
 from bs4 import BeautifulSoup
 from docx import Document
-from docx.shared import Inches
+from docx.shared import Inches, Pt, RGBColor
 from datetime import datetime
 
 
@@ -147,24 +147,62 @@ except Exception as e:
     st.stop()
 
 
-def generate_html_cookbook(recipes, title):
-    css = """
-        body { font-family: Georgia, serif; max-width: 900px; margin: 40px auto; padding: 20px; background: #fdfdfd; color: #333; line-height: 1.6; }
-        .header { text-align: center; padding: 60px 20px; background: linear-gradient(135deg, #f9e4d4 0%, #f7d0c0 100%); border-radius: 20px; margin-bottom: 50px; }
-        .recipe { background: white; padding: 40px; margin: 40px 0; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); }
-        .recipe-title { font-size: 32px; color: #d35400; border-bottom: 3px solid #e74c3c; padding-bottom: 10px; }
-        .section-title { font-size: 24px; color: #c0392b; margin: 30px 0 15px; }
-        .ingredients { padding: 20px; background: #fef9e8; border-radius: 10px; }
-        .ingredient { margin: 10px 0; padding-left: 10px; }
-        .steps { padding-left: 10px; }
-        .step { margin: 20px 0; }
-        .step-number { font-weight: bold; color: #e74c3c; margin-right: 10px; }
-        @media print { body { background: white; margin: 0; } .recipe { box-shadow: none; page-break-inside: avoid; } }
+def generate_html_cookbook(recipes, title, selected_style):
+    # Common parts (header HTML is shared)
+    header_html = f"""
+    <div class="header"><h1>{title}</h1><p>Our Family Recipes • {datetime.now().strftime('%B %Y')}</p></div>
     """
+
+    # Three full CSS variants
+    if selected_style == "Trendy Simple":
+        css = """
+        body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; max-width: 900px; margin: 40px auto; padding: 20px; background: #ffffff; color: #2c3e50; line-height: 1.8; }
+        .header { text-align: center; padding: 60px 20px; background: linear-gradient(135deg, #eceff1 0%, #cfd8dc 100%); border-radius: 20px; margin-bottom: 50px; color: #2c3e50; }
+        .recipe { background: #ffffff; padding: 40px; margin: 40px 0; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); border: 1px solid #ecf0f1; }
+        .recipe-title { font-size: 34px; color: #2c3e50; border-bottom: 4px solid #3498db; padding-bottom: 12px; margin-bottom: 30px; }
+        .section-title { font-size: 24px; color: #2980b9; margin: 30px 0 15px; font-weight: 600; }
+        .ingredients { padding: 25px; background: #f0f8ff; border-radius: 10px; border-left: 6px solid #3498db; }
+        .ingredient { margin: 12px 0; padding-left: 5px; }
+        .steps { padding-left: 10px; }
+        .step { margin: 25px 0; font-size: 17px; }
+        .step-number { font-weight: bold; color: #3498db; margin-right: 12px; font-size: 1.3em; }
+        @media print { body { background: white; margin: 0; } .recipe { box-shadow: none; border: none; page-break-inside: avoid; } }
+        """
+
+    elif selected_style == "Old School Farmhouse":
+        css = """
+        body { font-family: Georgia, 'Times New Roman', serif; max-width: 900px; margin: 40px auto; padding: 20px; background: #fffef5; color: #4e342e; line-height: 1.7; }
+        .header { text-align: center; padding: 60px 20px; background: linear-gradient(135deg, #ffebcd 0%, #f5deb3 100%); border-radius: 20px; margin-bottom: 50px; }
+        .recipe { background: white; padding: 45px; margin: 40px 0; border-radius: 15px; box-shadow: 0 6px 20px rgba(0,0,0,0.1); border: 1px solid #deb887; }
+        .recipe-title { font-size: 36px; color: #8b4513; border-bottom: 4px double #d2691e; padding-bottom: 15px; }
+        .section-title { font-size: 26px; color: #a0522d; margin: 35px 0 15px; }
+        .ingredients { padding: 25px; background: #fffacd; border-radius: 12px; border: 2px dashed #deb887; }
+        .ingredient { margin: 12px 0; padding-left: 10px; }
+        .steps { padding-left: 10px; }
+        .step { margin: 25px 0; }
+        .step-number { font-weight: bold; color: #cd853f; margin-right: 12px; font-size: 1.2em; }
+        @media print { body { background: white; } .recipe { box-shadow: none; page-break-inside: avoid; } }
+        """
+
+    else:  # The Food Lab
+        css = """
+        body { font-family: Arial, Helvetica, sans-serif; max-width: 900px; margin: 40px auto; padding: 20px; background: #ffffff; color: #000000; line-height: 1.7; }
+        .header { text-align: center; padding: 60px 20px; background: #ff6600; color: white; border-radius: 0; margin-bottom: 60px; }
+        .recipe { background: #ffffff; padding: 40px; margin: 40px 0; border: 2px solid #333; border-radius: 0; }
+        .recipe-title { font-size: 38px; color: #ff6600; border-bottom: 5px solid #ff6600; padding-bottom: 10px; letter-spacing: 1px; font-weight: bold; }
+        .section-title { font-size: 24px; color: #333333; margin: 40px 0 20px; text-transform: uppercase; letter-spacing: 2px; border-bottom: 1px solid #ccc; padding-bottom: 8px; }
+        .ingredients { padding: 20px; background: #f9f9f9; border-left: 8px solid #ff6600; }
+        .ingredient { margin: 12px 0; font-size: 16px; }
+        .steps { padding-left: 0; counter-reset: step-counter; }
+        .step { margin: 30px 0; font-size: 17px; }
+        .step-number { font-weight: bold; color: #ff6600; margin-right: 15px; font-size: 1.5em; }
+        @media print { body { background: white; margin: 0; } .recipe { border: 1px solid #000; page-break-inside: avoid; } }
+        """
+
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>{title}</title>
 <style>{css}</style></head><body>
-<div class="header"><h1>{title}</h1><p>Our Family Recipes • {datetime.now().strftime('%B %Y')}</p></div>
+{header_html}
 """
     for recipe in recipes:
         html += f'<div class="recipe"><div class="recipe-title">{recipe.get("title", "Untitled")}</div>'
@@ -180,13 +218,40 @@ def generate_html_cookbook(recipes, title):
     return html
 
 
-def generate_docx_cookbook(recipes, title, one_per_page):
+def generate_docx_cookbook(recipes, title, one_per_page, selected_style):
     doc = Document()
     section = doc.sections[0]
     section.top_margin = Inches(0.8)
     section.bottom_margin = Inches(0.8)
     section.left_margin = Inches(0.8)
     section.right_margin = Inches(0.8)
+
+    # Style-specific settings
+    if selected_style == "Trendy Simple":
+        normal_font = 'Arial'
+        heading_font = 'Arial'
+        heading_color = RGBColor(44, 62, 80)      # dark blue-gray
+        accent_color = RGBColor(52, 152, 219)     # blue
+    elif selected_style == "Old School Farmhouse":
+        normal_font = 'Times New Roman'
+        heading_font = 'Georgia'
+        heading_color = RGBColor(139, 69, 19)     # saddlebrown
+        accent_color = RGBColor(205, 133, 63)     # peru
+    else:  # The Food Lab
+        normal_font = 'Calibri'
+        heading_font = 'Arial Black'
+        heading_color = RGBColor(255, 102, 0)     # bright orange
+        accent_color = RGBColor(255, 102, 0)
+
+    # Apply to Word styles
+    styles = doc.styles
+    styles['Normal'].font.name = normal_font
+    styles['Normal'].font.size = Pt(11)
+    styles['Heading 1'].font.name = heading_font
+    styles['Heading 1'].font.size = Pt(28)
+    styles['Heading 1'].font.color.rgb = heading_color
+    styles['Heading 2'].font.name = heading_font
+    styles['Heading 2'].font.color.rgb = heading_color
 
     # Cover
     doc.add_heading(title, 0).alignment = 1
@@ -195,7 +260,7 @@ def generate_docx_cookbook(recipes, title, one_per_page):
     doc.add_paragraph(f"{datetime.now().strftime('%B %Y')}").alignment = 1
     doc.add_page_break()
 
-    # Simple index
+    # Index
     doc.add_heading('Recipes', level=1)
     for recipe in recipes:
         doc.add_paragraph(recipe.get('title', 'Untitled'), style='List Number')
@@ -211,8 +276,12 @@ def generate_docx_cookbook(recipes, title, one_per_page):
         for i, step in enumerate(recipe.get('steps', []), 1):
             clean = strip_step_numbering(step)
             p = doc.add_paragraph()
-            p.add_run(f"{i}. ").bold = True
+            num_run = p.add_run(f"{i}. ")
+            num_run.bold = True
+            num_run.font.color.rgb = accent_color
+            num_run.font.size = Pt(14)
             p.add_run(clean)
+
         if one_per_page:
             doc.add_page_break()
 
@@ -383,14 +452,21 @@ if st.session_state.recipes:
                     st.error("Invalid backup file")
 
     st.markdown("### Generate your cookbook")
-    one_per_page = st.checkbox("One recipe per page (recommended for printing)", value=True)
+    col_style1, col_style2 = st.columns([1, 3])
+    with col_style1:
+        one_per_page = st.checkbox("One recipe per page (recommended for printing)", value=True)
+    with col_style2:
+        style = st.selectbox(
+            "Choose cookbook aesthetic",
+            ["Trendy Simple", "Old School Farmhouse", "The Food Lab"]
+        )
 
     if st.button("📖 Create Cookbook", type="primary", use_container_width=True):
         if not st.session_state.recipes:
             st.error("No recipes yet!")
         else:
             # DOCX
-            doc = generate_docx_cookbook(st.session_state.recipes, cookbook_title, one_per_page)
+            doc = generate_docx_cookbook(st.session_state.recipes, cookbook_title, one_per_page, style)
             docx_io = io.BytesIO()
             doc.save(docx_io)
             docx_io.seek(0)
@@ -404,7 +480,7 @@ if st.session_state.recipes:
             )
 
             # HTML preview
-            html = generate_html_cookbook(st.session_state.recipes, cookbook_title)
+            html = generate_html_cookbook(st.session_state.recipes, cookbook_title, style)
             st.markdown("#### 📱 Live Preview (great on phone too)")
             st.html(html)
 
