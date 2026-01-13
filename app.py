@@ -548,11 +548,23 @@ if st.session_state.recipes:
 
     one_per_page = st.checkbox("One recipe per page (recommended for printing)", value=True)
 
-    style = st.radio(
-        "Cookbook aesthetic",
-        ["Trendy Simple", "Old School Farmhouse", "The Food Lab"],
-        horizontal=True
-    )
+    st.markdown("**Cookbook aesthetic**")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("Trendy Simple", use_container_width=True):
+            st.session_state.selected_style = "Trendy Simple"
+    with col2:
+        if st.button("Old School Farmhouse", use_container_width=True):
+            st.session_state.selected_style = "Old School Farmhouse"
+    with col3:
+        if st.button("The Food Lab", use_container_width=True):
+            st.session_state.selected_style = "The Food Lab"
+
+    # Default to first style if not set
+    if "selected_style" not in st.session_state:
+        st.session_state.selected_style = "Trendy Simple"
+
+    style = st.session_state.selected_style
 
     if st.button("📖 Create Cookbook", type="primary", use_container_width=True):
         if not st.session_state.recipes:
