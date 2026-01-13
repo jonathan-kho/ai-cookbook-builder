@@ -10,6 +10,7 @@ import requests
 from bs4 import BeautifulSoup
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from datetime import datetime
 
 
@@ -221,43 +222,116 @@ def generate_html_cookbook(recipes, title, selected_style):
 def generate_docx_cookbook(recipes, title, one_per_page, selected_style):
     doc = Document()
     section = doc.sections[0]
-    section.top_margin = Inches(0.8)
-    section.bottom_margin = Inches(0.8)
-    section.left_margin = Inches(0.8)
-    section.right_margin = Inches(0.8)
+    section.top_margin = Inches(1)
+    section.bottom_margin = Inches(1)
+    section.left_margin = Inches(1)
+    section.right_margin = Inches(1)
 
-    # Style-specific settings
+    # Style-specific typography & spacing
     if selected_style == "Trendy Simple":
         normal_font = 'Arial'
         heading_font = 'Arial'
         heading_color = RGBColor(44, 62, 80)      # dark blue-gray
-        accent_color = RGBColor(52, 152, 219)     # blue
+        accent_color = RGBColor(52, 152, 219)     # vibrant blue
+        line_spacing = 1.5
+        body_size = Pt(12)
+        title_size = Pt(48)
+        step_num_size = Pt(18)
+        step_indent = Inches(0.3)
     elif selected_style == "Old School Farmhouse":
-        normal_font = 'Times New Roman'
+        normal_font = 'Georgia'
         heading_font = 'Georgia'
         heading_color = RGBColor(139, 69, 19)     # saddlebrown
-        accent_color = RGBColor(205, 133, 63)     # peru
+        accent_color = RGBColor(205, 133, 63)     # warm peru
+        line_spacing = 1.5
+        body_size = Pt(12)
+        title_size = Pt(42)
+        step_num_size = Pt(16)
+        step_indent = Inches(0.5)
     else:  # The Food Lab
         normal_font = 'Calibri'
-        heading_font = 'Arial Black'
-        heading_color = RGBColor(255, 102, 0)     # bright orange
+        heading_font = 'Arial'
+        heading_color = RGBColor(255, 102, 0)     # signature orange
         accent_color = RGBColor(255, 102, 0)
+        line_spacing = 1.2
+        body_size = Pt(11)
+        title_size = Pt(54)
+        step_num_size = Pt(22)
+        step_indent = Inches(0.2)
 
-    # Apply to Word styles
+    # Apply global styles
     styles = doc.styles
-    styles['Normal'].font.name = normal_font
-    styles['Normal'].font.size = Pt(11)
-    styles['Heading 1'].font.name = heading_font
-    styles['Heading 1'].font.size = Pt(28)
-    styles['Heading 1'].font.color.rgb = heading_color
-    styles['Heading 2'].font.name = heading_font
-    styles['Heading 2'].font.color.rgb = heading_color
+    normal_style = styles['Normal']
+    normal_style.font.name = normal_font
+    normal_style.font.size = body_size
+    normal_style.paragraph_format.line_spacing = line_spacing
+    normal_style.paragraph_format.space_after = Pt(8)
 
-    # Cover
-    doc.add_heading(title, 0).alignment = 1
-    p = doc.add_paragraph('Our Family Recipes\n\nCollected with love')
-    p.alignment = 1
-    doc.add_paragraph(f"{datetime.now().strftime('%B %Y')}").alignment = 1
+    styles['List Bullet'].paragraph_format.space_after = Pt(8)
+    styles['List Number'].paragraph_format.space_after = Pt(10)
+
+    h1 = styles['Heading 1']
+    h1.font.name = heading_font
+    h1.font.size = Pt(36)
+    h1.font.color.rgb = heading_color
+    h1.font.bold = True
+    h1.paragraph_format.space_before = Pt(48)
+    h1.paragraph_format.space_after = Pt(24)
+
+    h2 = styles['Heading 2']
+    h2.font.name = heading_font
+    h2.font.size = Pt(22)
+    h2.font.color.rgb = heading_color
+    h2.font.bold = True
+    h2.paragraph_format.space_before = Pt(30)
+    h2.paragraph_format.space_after = Pt(14)
+
+    # Enhanced Title Page
+    doc.add_paragraph()  # ensure clean start
+
+    title_para = doc.add_paragraph()
+    title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title_run = title_para.add_run(title)
+    title_run.font.name = heading_font
+    title_run.font.color.rgb = heading_color
+    title_run.bold = True
+    title_run.font.size = title_size
+
+    doc.add_paragraph()  # spacing
+    doc.add_paragraph()
+
+    subtitle_para = doc.add_paragraph()
+    subtitle_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    sub_run = subtitle_para.add_run("Our Family Recipes")
+    sub_run.font.name = heading_font
+    sub_run.font.color.rgb = heading_color
+    sub_run.font.size = Pt(32)
+    sub_run.italic = (selected_style == "Old School Farmhouse")
+    sub_run.bold = (selected_style == "The Food Lab")
+
+    doc.add_paragraph()
+    doc.add_paragraph()
+    doc.add_paragraph()
+
+    love_para = doc.add_paragraph()
+    love_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    love_run = love_para.add_run("Collected with love")
+    love_run.font.size = Pt(20)
+    love_run.italic = True
+    love_run.font.color.rgb = accent_color
+
+    doc.add_paragraph()
+    doc.add_paragraph()
+    doc.add_paragraph()
+    doc.add_paragraph()
+
+    date_para = doc.add_paragraph()
+    date_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    date_run = date_para.add_run(datetime.now().strftime('%B %Y'))
+    date_run.font.name = heading_font
+    date_run.font.size = Pt(20)
+    date_run.font.color.rgb = heading_color
+
     doc.add_page_break()
 
     # Index
@@ -267,19 +341,38 @@ def generate_docx_cookbook(recipes, title, one_per_page, selected_style):
     doc.add_page_break()
 
     # Recipes
-    for recipe in recipes:
+    for idx, recipe in enumerate(recipes):
+        # Extra separation when multiple recipes per page
+        if idx > 0 and not one_per_page:
+            for _ in range(6):
+                doc.add_paragraph()
+
         doc.add_heading(recipe.get('title', 'Untitled'), level=1)
-        doc.add_heading('Ingredients', level=2)
+
+        ing_heading = doc.add_heading('Ingredients', level=2)
+        if selected_style == "The Food Lab":
+            for run in ing_heading.runs:
+                run.font.all_caps = True
+
         for ing in recipe.get('ingredients', []):
-            doc.add_paragraph(ing, style='List Bullet')
-        doc.add_heading('Instructions', level=2)
+            p = doc.add_paragraph(ing, style='List Bullet')
+            p.paragraph_format.left_indent = Inches(0.25)
+
+        instr_heading = doc.add_heading('Instructions', level=2)
+        if selected_style == "The Food Lab":
+            for run in instr_heading.runs:
+                run.font.all_caps = True
+
         for i, step in enumerate(recipe.get('steps', []), 1):
             clean = strip_step_numbering(step)
             p = doc.add_paragraph()
+            p.paragraph_format.space_before = Pt(10)
+            p.paragraph_format.space_after = Pt(14)
+            p.paragraph_format.left_indent = step_indent
             num_run = p.add_run(f"{i}. ")
             num_run.bold = True
             num_run.font.color.rgb = accent_color
-            num_run.font.size = Pt(14)
+            num_run.font.size = step_num_size
             p.add_run(clean)
 
         if one_per_page:
